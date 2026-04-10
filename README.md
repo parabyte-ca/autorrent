@@ -1,6 +1,6 @@
 # AutoRrent
 
-A self-hosted torrent auto-downloader with a clean web interface. Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
+A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
 Built for non-technical users — configure everything through the UI, no config files required.
 
