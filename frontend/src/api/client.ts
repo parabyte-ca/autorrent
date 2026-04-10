@@ -32,6 +32,7 @@ export interface WatchlistItem {
   title: string;
   search_query: string;
   quality: string;
+  codec: string;
   season: number;
   episode: number;
   download_path_id?: number;
@@ -45,6 +46,7 @@ export interface WatchlistCreate {
   title: string;
   search_query: string;
   quality: string;
+  codec: string;
   season: number;
   episode: number;
   download_path_id?: number;
@@ -77,8 +79,8 @@ export type Settings = Record<string, string>;
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
-  search(q: string, indexer = "all", quality?: string) {
-    const p = new URLSearchParams({ q, indexer });
+  search(q: string, indexer = "all", quality?: string, codec = "x265", filterAdult = true) {
+    const p = new URLSearchParams({ q, indexer, codec, filter_adult: String(filterAdult) });
     if (quality && quality !== "Any") p.set("quality", quality);
     return req<TorrentResult[]>(`/search?${p}`);
   },

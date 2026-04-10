@@ -32,7 +32,12 @@ def scan_watchlist() -> None:
 
             try:
                 query = f"{item.search_query} S{item.season:02d}E{item.episode:02d}"
-                results = search_all(query, quality=item.quality)
+                results = search_all(
+                    query,
+                    quality=item.quality,
+                    codec=item.codec or "x265",
+                    filter_adult=True,
+                )
                 results = [r for r in results if r["seeds"] >= min_seeds]
 
                 if not results:

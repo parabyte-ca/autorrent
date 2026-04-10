@@ -45,6 +45,7 @@ class WatchlistCreate(BaseModel):
     title: str
     search_query: str
     quality: str = "1080p"
+    codec: str = "x265"
     season: int = 1
     episode: int = 1
     download_path_id: Optional[int] = None
@@ -55,6 +56,7 @@ class WatchlistUpdate(BaseModel):
     title: Optional[str] = None
     search_query: Optional[str] = None
     quality: Optional[str] = None
+    codec: Optional[str] = None
     season: Optional[int] = None
     episode: Optional[int] = None
     download_path_id: Optional[int] = None
@@ -66,6 +68,7 @@ class WatchlistOut(BaseModel):
     title: str
     search_query: str
     quality: str
+    codec: str = "x265"
     season: int
     episode: int
     download_path_id: Optional[int] = None

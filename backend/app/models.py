@@ -13,6 +13,7 @@ class WatchlistItem(Base):
     season = Column(Integer, default=1)
     episode = Column(Integer, default=1)
     download_path_id = Column(Integer, ForeignKey("download_paths.id"), nullable=True)
+    codec = Column(String, default="x265", server_default="x265")
     enabled = Column(Boolean, default=True)
     last_checked = Column(DateTime, nullable=True)
     last_found = Column(DateTime, nullable=True)

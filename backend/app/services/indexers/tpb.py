@@ -52,6 +52,7 @@ def search_tpb(query: str) -> list[dict]:
             "quality": _quality(name),
             "source": "tpb",
             "url": f"https://thepiratebay.org/description.php?id={item.get('id', '')}",
+            "_tpb_category": int(item.get("category", 0)),
         })
 
     return results

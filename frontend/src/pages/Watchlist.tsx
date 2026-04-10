@@ -15,6 +15,7 @@ import {
 import { api, type DownloadPath, type WatchlistCreate, type WatchlistItem } from "../api/client";
 
 const QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
+const CODECS = ["x265", "x264", "AV1", "Any"];
 
 function fmtDate(d?: string) {
   if (!d) return "Never";
@@ -47,6 +48,7 @@ function FormModal({ initial, paths, onClose, onSave }: FormModalProps) {
           title: initial.title,
           search_query: initial.search_query,
           quality: initial.quality,
+          codec: initial.codec ?? "x265",
           season: initial.season,
           episode: initial.episode,
           download_path_id: initial.download_path_id,
@@ -56,6 +58,7 @@ function FormModal({ initial, paths, onClose, onSave }: FormModalProps) {
           title: "",
           search_query: "",
           quality: "1080p",
+          codec: "x265",
           season: 1,
           episode: 1,
           download_path_id: defaultPath?.id,
@@ -123,17 +126,31 @@ function FormModal({ initial, paths, onClose, onSave }: FormModalProps) {
               />
             </div>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Quality</label>
-            <select
-              value={form.quality}
-              onChange={(e) => set("quality", e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {QUALITIES.map((q) => (
-                <option key={q}>{q}</option>
-              ))}
-            </select>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-sm font-medium text-gray-700">Quality</label>
+              <select
+                value={form.quality}
+                onChange={(e) => set("quality", e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {QUALITIES.map((q) => (
+                  <option key={q}>{q}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="mb-1 block text-sm font-medium text-gray-700">Codec</label>
+              <select
+                value={form.codec}
+                onChange={(e) => set("codec", e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CODECS.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </div>
           </div>
           {paths.length > 0 && (
             <div>
@@ -328,6 +345,7 @@ export default function Watchlist() {
               <div className="mb-3 space-y-1 text-xs text-gray-500">
                 <div className="flex gap-4">
                   <span>Quality: <strong className="text-gray-700">{item.quality}</strong></span>
+                  <span>Codec: <strong className="text-gray-700">{item.codec ?? "x265"}</strong></span>
                   <span>Save to: <strong className="text-gray-700">{pathName(item.download_path_id)}</strong></span>
                 </div>
                 <div className="flex items-center gap-1">

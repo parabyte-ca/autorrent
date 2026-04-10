@@ -6,15 +6,17 @@ import {
   Loader2,
   Plus,
   Search as SearchIcon,
+  Shield,
   Users,
 } from "lucide-react";
 import { api, type DownloadPath, type TorrentResult, type WatchlistCreate } from "../api/client";
 
 const QUALITIES = ["Any", "4K", "1080p", "720p", "480p"];
+const CODECS = ["x265", "x264", "AV1", "Any"];
 const INDEXERS = [
-  { value: "all",    label: "All sources" },
-  { value: "nyaa",   label: "NYAA" },
-  { value: "tpb",    label: "The Pirate Bay" },
+  { value: "all",     label: "All sources" },
+  { value: "nyaa",    label: "NYAA" },
+  { value: "tpb",     label: "The Pirate Bay" },
   { value: "jackett", label: "Jackett" },
 ];
 
@@ -114,12 +116,13 @@ interface WatchlistModalProps {
   onConfirm: (data: WatchlistCreate) => void;
 }
 
-function WatchlistModal({ result, paths, onClose, onConfirm }: WatchlistModalProps) {
+function WatchlistModal({ result, paths, onClose, onConfirm, defaultCodec }: WatchlistModalProps & { defaultCodec: string }) {
   const defaultPath = paths.find((p) => p.is_default);
   const [form, setForm] = useState<WatchlistCreate>({
     title: result.title.replace(/S\d+E\d+.*/i, "").trim(),
     search_query: result.title.replace(/S\d+E\d+.*/i, "").trim(),
     quality: result.quality && result.quality !== "Unknown" ? result.quality : "1080p",
+    codec: defaultCodec !== "Any" ? defaultCodec : "x265",
     season: 1,
     episode: 1,
     download_path_id: defaultPath?.id,
@@ -178,19 +181,31 @@ function WatchlistModal({ result, paths, onClose, onConfirm }: WatchlistModalPro
               />
             </div>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Preferred quality
-            </label>
-            <select
-              value={form.quality}
-              onChange={(e) => set("quality", e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {QUALITIES.filter((q) => q !== "Any").map((q) => (
-                <option key={q}>{q}</option>
-              ))}
-            </select>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-sm font-medium text-gray-700">Quality</label>
+              <select
+                value={form.quality}
+                onChange={(e) => set("quality", e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {QUALITIES.filter((q) => q !== "Any").map((q) => (
+                  <option key={q}>{q}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="mb-1 block text-sm font-medium text-gray-700">Codec</label>
+              <select
+                value={form.codec}
+                onChange={(e) => set("codec", e.target.value)}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {CODECS.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </div>
           </div>
           {paths.length > 0 && (
             <div>
@@ -237,7 +252,9 @@ function WatchlistModal({ result, paths, onClose, onConfirm }: WatchlistModalPro
 export default function Search() {
   const [query, setQuery] = useState("");
   const [quality, setQuality] = useState("Any");
+  const [codec, setCodec] = useState("x265");
   const [indexer, setIndexer] = useState("all");
+  const [filterAdult, setFilterAdult] = useState(true);
   const [results, setResults] = useState<TorrentResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -258,7 +275,7 @@ export default function Search() {
     setError(null);
     try {
       const [res, p] = await Promise.all([
-        api.search(query, indexer, quality),
+        api.search(query, indexer, quality, codec, filterAdult),
         api.paths.list(),
       ]);
       setResults(res);
@@ -305,7 +322,7 @@ export default function Search() {
       </div>
 
       {/* Search bar */}
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row">
         <input
           ref={inputRef}
           value={query}
@@ -314,26 +331,6 @@ export default function Search() {
           placeholder="Search for a show, movie, or episode…"
           className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <select
-          value={quality}
-          onChange={(e) => setQuality(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {QUALITIES.map((q) => (
-            <option key={q}>{q}</option>
-          ))}
-        </select>
-        <select
-          value={indexer}
-          onChange={(e) => setIndexer(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {INDEXERS.map((i) => (
-            <option key={i.value} value={i.value}>
-              {i.label}
-            </option>
-          ))}
-        </select>
         <button
           onClick={doSearch}
           disabled={loading}
@@ -345,6 +342,64 @@ export default function Search() {
             <SearchIcon className="h-4 w-4" />
           )}
           Search
+        </button>
+      </div>
+
+      {/* Filters row */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium text-gray-500">Quality</label>
+          <select
+            value={quality}
+            onChange={(e) => setQuality(e.target.value)}
+            className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {QUALITIES.map((q) => (
+              <option key={q}>{q}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium text-gray-500">Codec</label>
+          <select
+            value={codec}
+            onChange={(e) => setCodec(e.target.value)}
+            className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {CODECS.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium text-gray-500">Source</label>
+          <select
+            value={indexer}
+            onChange={(e) => setIndexer(e.target.value)}
+            className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {INDEXERS.map((i) => (
+              <option key={i.value} value={i.value}>
+                {i.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Adult filter toggle */}
+        <button
+          onClick={() => setFilterAdult((v) => !v)}
+          title={filterAdult ? "Adult content is being filtered out" : "Adult content is visible — click to filter"}
+          className={`ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+            filterAdult
+              ? "border-green-300 bg-green-50 text-green-700 hover:bg-green-100"
+              : "border-red-300 bg-red-50 text-red-600 hover:bg-red-100"
+          }`}
+        >
+          <Shield className="h-3.5 w-3.5" />
+          {filterAdult ? "Adult filter: ON" : "Adult filter: OFF"}
         </button>
       </div>
 
@@ -458,6 +513,7 @@ export default function Search() {
         <WatchlistModal
           result={watchlistTarget}
           paths={paths}
+          defaultCodec={codec}
           onClose={() => setWatchlistTarget(null)}
           onConfirm={handleWatchlist}
         />

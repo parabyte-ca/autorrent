@@ -7,6 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import text
+
 from .database import Base, engine
 from .routers import downloads, paths, search, settings, watchlist
 from .services.scheduler import start_scheduler, stop_scheduler
@@ -19,6 +21,13 @@ DATA_DIR = pathlib.Path("/app/data")
 async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    # Migrate: add codec column if it doesn't exist yet (safe no-op if already present)
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE watchlist ADD COLUMN codec TEXT DEFAULT 'x265'"))
+            conn.commit()
+        except Exception:
+            pass
     start_scheduler()
     yield
     stop_scheduler()
