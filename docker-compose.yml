@@ -1,0 +1,14 @@
+services:
+  autorrent:
+    build: .
+    ports:
+      - "8180:8000"
+    volumes:
+      # Persists the SQLite database across container restarts
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:////app/data/autorrent.db
+    restart: unless-stopped
+    # Optional: give the container access to NAS paths
+    # volumes:
+    #   - /mnt/nas:/mnt/nas
