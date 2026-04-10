@@ -361,6 +361,27 @@ export default function Settings() {
               />
             </div>
           </div>
+
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={settings.remove_on_complete === "true"}
+                onChange={(e) => set("remove_on_complete", e.target.checked ? "true" : "false")}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <div>
+                <span className="text-sm font-medium text-gray-700">
+                  Remove from qBittorrent when download completes
+                </span>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  Once a torrent finishes downloading and starts seeding, AutoRrent will
+                  remove it from qBittorrent automatically. Your downloaded files are kept —
+                  only the torrent entry is removed.
+                </p>
+              </div>
+            </label>
+          </div>
         </section>
 
         {/* Jackett */}

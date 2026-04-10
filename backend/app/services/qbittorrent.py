@@ -59,6 +59,12 @@ def get_torrent_status(info_hash: str) -> dict | None:
     return None
 
 
+def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
+    """Remove a torrent from qBittorrent, optionally deleting downloaded files."""
+    client = _get_client()
+    client.torrents_delete(delete_files=delete_files, torrent_hashes=info_hash)
+
+
 def test_connection() -> tuple[bool, str]:
     try:
         client = _get_client()
