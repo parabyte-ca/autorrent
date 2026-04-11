@@ -2,6 +2,8 @@
 
 > A self-hosted torrent manager with a clean, approachable web UI — built for people who just want things to work.
 
+**v1.1** — Now with a collapsible sidebar and light / dark / system theme support.
+
 AutoRrent connects to your existing [qBittorrent](https://www.qbittorrent.org/) instance and gives it a friendlier face. Search across multiple torrent indexers, send downloads straight to qBittorrent with a folder picker, and set up a watchlist that tracks TV shows and automatically grabs new episodes the moment they appear — no manual checking required.
 
 Everything is configured through the UI. No config files, no command line, no YAML.
@@ -38,6 +40,10 @@ Everything is configured through the UI. No config files, no command line, no YA
 - Optional notifications via [Apprise](https://github.com/caronc/apprise) — supports Telegram, Discord, Slack, email, Pushover, Ntfy, Gotify, and 60+ other services
 - Triggered automatically whenever the watchlist downloads a new episode
 - Configured with a single URL string in Settings
+
+### UI & Accessibility
+- **Collapsible sidebar** — collapse the nav to icons-only to maximise screen space; preference is saved between sessions
+- **Theme picker** — choose **Light**, **Dark**, or **System** (follows your OS preference); fully dark-mode throughout
 
 ### Self-Hosted & Simple
 - Runs in a **single Docker container** — no separate database server, no Redis, no message queue
@@ -231,7 +237,7 @@ autorrent/
 | Torrent client | qbittorrentapi |
 | HTTP / scraping | httpx |
 | Notifications | Apprise |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS |
+| Frontend | React 18, TypeScript, Vite, Tailwind CSS (dark mode) |
 | Icons | Lucide React |
 | Deployment | Docker (multi-stage build), Docker Compose |
 
