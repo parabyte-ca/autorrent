@@ -103,6 +103,37 @@ def scan_watchlist() -> None:
         db.close()
 
     logger.info("Watchlist scan complete")
+    _cleanup_completed()
+
+
+def _cleanup_completed() -> None:
+    """Remove completed (seeding) torrents from qBittorrent if the setting is enabled."""
+    from ..database import SessionLocal
+    from ..models import Download, Setting
+    from .qbittorrent import remove_torrent
+
+    db = SessionLocal()
+    try:
+        settings = {s.key: s.value for s in db.query(Setting).all()}
+        if settings.get("remove_on_complete", "false").lower() != "true":
+            return
+
+        seeding = db.query(Download).filter(Download.status == "seeding").all()
+        for dl in seeding:
+            if not dl.torrent_hash:
+                continue
+            try:
+                remove_torrent(dl.torrent_hash, delete_files=False)
+                dl.status = "done"
+                logger.info("Removed completed torrent from qBittorrent: %s", dl.title)
+            except Exception as e:
+                logger.warning("Could not remove torrent %s: %s", dl.torrent_hash, e)
+
+        db.commit()
+    except Exception as e:
+        logger.error("Cleanup failed: %s", e)
+    finally:
+        db.close()
 
 
 def _get_interval() -> int:

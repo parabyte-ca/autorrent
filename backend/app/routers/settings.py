@@ -16,6 +16,7 @@ DEFAULTS: dict[str, str] = {
     "qbit_category": "autorrent",
     "scan_interval_minutes": "60",
     "min_seeds": "3",
+    "remove_on_complete": "false",
     "jackett_url": "",
     "jackett_api_key": "",
     "apprise_url": "",
