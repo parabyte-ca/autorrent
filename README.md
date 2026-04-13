@@ -1,6 +1,6 @@
 # AutoRrent
 
-> A self-hosted torrent manager with a clean, approachable web UI — built for people who just want things to work.
+A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
 **v1.1** — Now with a collapsible sidebar and light / dark / system theme support.
 
