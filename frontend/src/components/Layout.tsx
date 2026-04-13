@@ -132,7 +132,7 @@ export default function Layout() {
             ))}
           </div>
           {!collapsed && (
-            <p className="text-xs text-gray-400 dark:text-gray-600">AutoRrent v1.1</p>
+            <p className="text-xs text-gray-400 dark:text-gray-600">AutoRrent v1.2</p>
           )}
         </div>
       </aside>

@@ -2,7 +2,7 @@
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
-**v1.1** — Now with a collapsible sidebar and light / dark / system theme support.
+**v1.2** — Plex and Jellyfin library refresh on download completion, Docker healthcheck, and a live system status indicator in Settings.
 
 AutoRrent connects to your existing [qBittorrent](https://www.qbittorrent.org/) instance and gives it a friendlier face. Search across multiple torrent indexers, send downloads straight to qBittorrent with a folder picker, and set up a watchlist that tracks TV shows and automatically grabs new episodes the moment they appear — no manual checking required.
 
@@ -36,6 +36,12 @@ Everything is configured through the UI. No config files, no command line, no YA
 - Pick from a dropdown when downloading — no typing paths manually
 - Mark any folder as the default
 
+### Media Server Integration
+- **Plex** — optionally trigger a Plex library refresh whenever a download completes. Configure your Plex URL and token in Settings; use the built-in "Test connection" button to discover your libraries and choose which one to refresh (or refresh all)
+- **Jellyfin** — optionally trigger a Jellyfin library refresh on completion. Enter your Jellyfin URL and API key; target a specific library by ID or leave blank to refresh everything
+- Both services are independent — configure one, both, or neither
+- Refreshes fire concurrently so neither service blocks the other
+
 ### Notifications
 - Optional notifications via [Apprise](https://github.com/caronc/apprise) — supports Telegram, Discord, Slack, email, Pushover, Ntfy, Gotify, and 60+ other services
 - Triggered automatically whenever the watchlist downloads a new episode
@@ -44,11 +50,13 @@ Everything is configured through the UI. No config files, no command line, no YA
 ### UI & Accessibility
 - **Collapsible sidebar** — collapse the nav to icons-only to maximise screen space; preference is saved between sessions
 - **Theme picker** — choose **Light**, **Dark**, or **System** (follows your OS preference); fully dark-mode throughout
+- **System status bar** — the Settings page shows a live green/amber/grey indicator with uptime and version, auto-refreshing every 30 seconds
 
 ### Self-Hosted & Simple
 - Runs in a **single Docker container** — no separate database server, no Redis, no message queue
 - SQLite database stored in a local volume — easy to back up, easy to move
 - All settings live in the UI — no environment variables or config files required beyond `docker-compose.yml`
+- Built-in **Docker healthcheck** — `docker ps` and Compose show container health; monitoring tools can poll `GET /health`
 
 ---
 
@@ -111,6 +119,12 @@ Paste an [Apprise URL](https://github.com/caronc/apprise#supported-notifications
 | Ntfy | `ntfy://your-topic` |
 | Email | `mailto://user:pass@gmail.com` |
 
+### 5. (Optional) Connect Plex or Jellyfin
+
+Enable the **Plex** or **Jellyfin** section in Settings and fill in your server details. Click **Test connection** to verify — Plex will also populate a library dropdown so you can target a specific section.
+
+Once enabled, AutoRrent automatically pings your media server to trigger a library scan each time a torrent finishes downloading.
+
 ---
 
 ## Usage
@@ -162,9 +176,35 @@ All settings are managed through the Settings page. The table below documents ea
 | Category | `autorrent` | qBittorrent category label applied to all AutoRrent downloads |
 | Scan interval | `60` min | How often the watchlist scanner runs |
 | Minimum seeds | `3` | Results with fewer seeds than this are ignored |
+| Remove on complete | off | Remove the torrent entry from qBittorrent when seeding begins (files are kept) |
 | Jackett / Prowlarr URL | — | e.g. `http://192.168.1.100:9117` |
 | Jackett / Prowlarr API key | — | Found in your Jackett/Prowlarr dashboard |
+| Plex URL | — | e.g. `http://192.168.1.100:32400` |
+| Plex token | — | Your X-Plex-Token — see Settings for a link to Plex's docs |
+| Plex library | All | Specific library to refresh, or all libraries |
+| Jellyfin URL | — | e.g. `http://192.168.1.100:8096` |
+| Jellyfin API key | — | Generated in Jellyfin → Dashboard → API Keys |
+| Jellyfin library ID | — | ItemId of the library to refresh; blank refreshes all |
 | Apprise URL | — | Notification endpoint — leave blank to disable |
+
+---
+
+## Health Endpoint
+
+`GET /health` returns a JSON status object and is always HTTP 200:
+
+```json
+{ "status": "ok", "db_ok": true, "uptime_seconds": 3600, "version": "dev" }
+```
+
+`status` is `"ok"` when the database is reachable, `"degraded"` otherwise. Useful for uptime monitors, reverse proxies, and the Docker healthcheck that ships with the image.
+
+The `APP_VERSION` environment variable sets the `version` field — useful when deploying tagged images:
+
+```yaml
+environment:
+  - APP_VERSION=1.2.0
+```
 
 ---
 
@@ -195,10 +235,16 @@ DATABASE_URL=sqlite:///./data/autorrent.db uvicorn app.main:app --reload --port 
 # Frontend (separate terminal)
 cd frontend
 npm install
-npm run dev   # runs on http://localhost:5173, proxies /api to :8000
+npm run dev   # runs on http://localhost:5173, proxies /api and /health to :8000
 ```
 
-The Vite dev server proxies all `/api` requests to the FastAPI backend, so hot-reload works for both sides independently.
+The Vite dev server proxies `/api` and `/health` to the FastAPI backend, so hot-reload works for both sides independently.
+
+```bash
+# Run backend tests
+cd backend
+python -m pytest tests/ -v
+```
 
 ### Project Structure
 
@@ -210,12 +256,14 @@ autorrent/
 │   │   ├── database.py          # SQLAlchemy + SQLite setup
 │   │   ├── models.py            # Database models
 │   │   ├── schemas.py           # Pydantic request/response schemas
-│   │   ├── routers/             # API route handlers
+│   │   ├── routers/             # API route handlers (health, search, watchlist…)
 │   │   └── services/
 │   │       ├── qbittorrent.py   # qBittorrent API wrapper
 │   │       ├── scheduler.py     # APScheduler watchlist scanner
+│   │       ├── media_servers.py # Plex + Jellyfin library refresh
 │   │       ├── apprise_notify.py
 │   │       └── indexers/        # NYAA, TPB, Jackett search + adult filter
+│   ├── tests/                   # pytest unit tests
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
