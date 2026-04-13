@@ -8,6 +8,26 @@ const FIELD = [
   "dark:bg-gray-800 dark:text-gray-100",
 ].join(" ");
 
+// ── Health types & helpers ────────────────────────────────────────────────────
+
+type HealthStatus = {
+  status: "ok" | "degraded";
+  db_ok: boolean;
+  uptime_seconds: number;
+  version: string;
+} | null;
+
+function fmtUptime(s: number): string {
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const parts: string[] = [];
+  if (d > 0) parts.push(`${d}d`);
+  parts.push(`${h}h`);
+  parts.push(`${m}m`);
+  return parts.join(" ");
+}
+
 // ── Reusable field ────────────────────────────────────────────────────────────
 
 function Field({ label, hint, type = "text", value, onChange, placeholder }: {
@@ -97,6 +117,7 @@ export default function Settings() {
   const [testingPlex,      setTestingPlex]      = useState(false);
   const [jellyfinTestResult, setJellyfinTestResult] = useState<JellyfinTestResult | null>(null);
   const [testingJellyfin,  setTestingJellyfin]  = useState(false);
+  const [health,           setHealth]           = useState<HealthStatus>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -105,6 +126,21 @@ export default function Settings() {
     setSettings(s); setPaths(p); setLoading(false);
   };
   useEffect(() => { load(); }, []);
+
+  const fetchHealth = async () => {
+    try {
+      const res = await fetch("/health");
+      if (res.ok) setHealth(await res.json());
+      else setHealth(null);
+    } catch {
+      setHealth(null);
+    }
+  };
+  useEffect(() => {
+    fetchHealth();
+    const id = setInterval(fetchHealth, 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const set = (k: string, v: string) => setSettings((s) => ({ ...s, [k]: v }));
 
@@ -167,6 +203,25 @@ export default function Settings() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure your qBittorrent connection and preferences.</p>
+      </div>
+
+      {/* System status bar */}
+      <div className="mb-6 flex items-center gap-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 text-sm shadow-sm">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${
+          health === null ? "bg-gray-400 dark:bg-gray-600" :
+          health.status === "ok" ? "bg-green-500" : "bg-amber-400"
+        }`} />
+        <span className="font-medium text-gray-700 dark:text-gray-300">
+          {health === null ? "Unreachable" : health.status === "ok" ? "System healthy" : "Degraded"}
+        </span>
+        {health !== null && (
+          <>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
+            <span className="text-gray-400 dark:text-gray-500">Up {fmtUptime(health.uptime_seconds)}</span>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
+            <span className="text-gray-400 dark:text-gray-500">v{health.version}</span>
+          </>
+        )}
       </div>
 
       <div className="space-y-6">

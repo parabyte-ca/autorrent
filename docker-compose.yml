@@ -9,6 +9,12 @@ services:
     environment:
       - DATABASE_URL=sqlite:////app/data/autorrent.db
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     # Optional: give the container access to NAS paths
     # volumes:
     #   - /mnt/nas:/mnt/nas
