@@ -87,3 +87,16 @@ class DownloadCreate(BaseModel):
     title: str
     download_path_id: Optional[int] = None
     watchlist_id: Optional[int] = None
+
+
+# ── Media server test connections ─────────────────────────────────────────────
+
+class PlexTestRequest(BaseModel):
+    url: str
+    token: str
+    library_key: Optional[str] = None
+
+
+class JellyfinTestRequest(BaseModel):
+    url: str
+    api_key: str

@@ -76,6 +76,25 @@ export interface DownloadPath {
 
 export type Settings = Record<string, string>;
 
+export interface PlexLibrary {
+  key: string;
+  title: string;
+  type: string;
+}
+
+export interface PlexTestResult {
+  ok: boolean;
+  error?: string;
+  libraries?: PlexLibrary[];
+}
+
+export interface JellyfinTestResult {
+  ok: boolean;
+  error?: string;
+  server_name?: string;
+  version?: string;
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -118,5 +137,9 @@ export const api = {
       req<Settings>("/settings", { method: "PUT", body: JSON.stringify(data) }),
     testQbit: () =>
       req<{ success: boolean; message: string }>("/settings/test-qbit", { method: "POST" }),
+    testPlex: (data: { url: string; token: string; library_key?: string }) =>
+      req<PlexTestResult>("/settings/test-plex", { method: "POST", body: JSON.stringify(data) }),
+    testJellyfin: (data: { url: string; api_key: string }) =>
+      req<JellyfinTestResult>("/settings/test-jellyfin", { method: "POST", body: JSON.stringify(data) }),
   },
 };
