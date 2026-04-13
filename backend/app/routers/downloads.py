@@ -1,16 +1,33 @@
+import asyncio
+import logging
+import threading
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Download, DownloadPath, Setting
 from ..schemas import DownloadCreate
+from ..services.media_servers import trigger_media_refresh
 from ..services.qbittorrent import add_torrent, get_torrent_status
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DONE_STATES = {"uploading", "stalledUP", "forcedUP", "checkingUP"}
 SEEDING_STATES = {"uploading", "stalledUP", "forcedUP"}
 DOWNLOADING_STATES = {"downloading", "stalledDL", "forcedDL", "checkingDL", "metaDL"}
+
+
+def _fire_media_refresh(settings_dict: dict) -> None:
+    """Spawn a daemon thread to run the media refresh without blocking the response."""
+    def _run():
+        try:
+            asyncio.run(trigger_media_refresh(settings_dict))
+        except Exception as e:
+            logger.error("Media refresh thread error: %s", e)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 @router.get("/downloads")
@@ -34,6 +51,7 @@ def get_downloads(db: Session = Depends(get_db)):
         }
 
         if d.torrent_hash and d.status not in ("done", "error"):
+            prev_status = d.status
             try:
                 qs = get_torrent_status(d.torrent_hash)
                 if qs:
@@ -46,6 +64,9 @@ def get_downloads(db: Session = Depends(get_db)):
                     if qstate in SEEDING_STATES:
                         d.status = "seeding"
                         item["status"] = "seeding"
+                        if prev_status != "seeding":
+                            settings_dict = {s.key: s.value for s in db.query(Setting).all()}
+                            _fire_media_refresh(settings_dict)
                     elif qstate in DOWNLOADING_STATES:
                         d.status = "downloading"
                         item["status"] = "downloading"

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2 } from "lucide-react";
-import { api, type DownloadPath, type Settings as SettingsType } from "../api/client";
+import { api, type DownloadPath, type JellyfinTestResult, type PlexLibrary, type PlexTestResult, type Settings as SettingsType } from "../api/client";
 
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
@@ -84,14 +84,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Settings() {
-  const [settings,   setSettings]   = useState<SettingsType>({});
-  const [paths,      setPaths]      = useState<DownloadPath[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [saving,     setSaving]     = useState(false);
-  const [testing,    setTesting]    = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [pathModal,  setPathModal]  = useState<DownloadPath | true | null>(null);
-  const [toast,      setToast]      = useState<string | null>(null);
+  const [settings,         setSettings]         = useState<SettingsType>({});
+  const [paths,            setPaths]            = useState<DownloadPath[]>([]);
+  const [loading,          setLoading]          = useState(true);
+  const [saving,           setSaving]           = useState(false);
+  const [testing,          setTesting]          = useState(false);
+  const [testResult,       setTestResult]       = useState<{ success: boolean; message: string } | null>(null);
+  const [pathModal,        setPathModal]        = useState<DownloadPath | true | null>(null);
+  const [toast,            setToast]            = useState<string | null>(null);
+  const [plexLibraries,    setPlexLibraries]    = useState<PlexLibrary[]>([]);
+  const [plexTestResult,   setPlexTestResult]   = useState<PlexTestResult | null>(null);
+  const [testingPlex,      setTestingPlex]      = useState(false);
+  const [jellyfinTestResult, setJellyfinTestResult] = useState<JellyfinTestResult | null>(null);
+  const [testingJellyfin,  setTestingJellyfin]  = useState(false);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -114,6 +119,30 @@ export default function Settings() {
     setTesting(true); setTestResult(null);
     try { setTestResult(await api.settings.testQbit()); }
     finally { setTesting(false); }
+  };
+
+  const handleTestPlex = async () => {
+    setTestingPlex(true); setPlexTestResult(null);
+    try {
+      const result = await api.settings.testPlex({
+        url: settings.plex_url ?? "",
+        token: settings.plex_token ?? "",
+        library_key: settings.plex_library_key || undefined,
+      });
+      setPlexTestResult(result);
+      if (result.ok && result.libraries) setPlexLibraries(result.libraries);
+    } finally { setTestingPlex(false); }
+  };
+
+  const handleTestJellyfin = async () => {
+    setTestingJellyfin(true); setJellyfinTestResult(null);
+    try {
+      const result = await api.settings.testJellyfin({
+        url: settings.jellyfin_url ?? "",
+        api_key: settings.jellyfin_api_key ?? "",
+      });
+      setJellyfinTestResult(result);
+    } finally { setTestingJellyfin(false); }
   };
 
   const handlePathSave = async (data: { name: string; path: string; is_default: boolean }) => {
@@ -256,6 +285,110 @@ export default function Settings() {
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="URL" value={settings.jackett_url ?? ""} onChange={(v) => set("jackett_url", v)} placeholder="http://localhost:9117" />
             <Field label="API Key" value={settings.jackett_api_key ?? ""} onChange={(v) => set("jackett_api_key", v)} placeholder="your-api-key" />
+          </div>
+        </Section>
+
+        {/* Plex */}
+        <Section title="Plex Media Server">
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Optional. AutoRrent will refresh your Plex library whenever a download completes.
+          </p>
+          <div className="mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={settings.plex_enabled === "true"}
+                onChange={(e) => set("plex_enabled", e.target.checked ? "true" : "false")}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Plex library refresh</span>
+            </label>
+          </div>
+          <div className={`space-y-3 ${settings.plex_enabled !== "true" ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Plex URL" value={settings.plex_url ?? ""} onChange={(v) => set("plex_url", v)} placeholder="http://192.168.1.100:32400" />
+              <div>
+                <Field label="Plex token" type="password" value={settings.plex_token ?? ""} onChange={(v) => set("plex_token", v)} placeholder="Your X-Plex-Token" />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  <a href="https://support.plex.tv/articles/204059436" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 underline">
+                    How to find your Plex token
+                  </a>
+                </p>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Library to refresh</label>
+              <select value={settings.plex_library_key ?? ""} onChange={(e) => set("plex_library_key", e.target.value)} className={FIELD}>
+                <option value="">All libraries</option>
+                {plexLibraries.map((lib) => (
+                  <option key={lib.key} value={lib.key}>{lib.title} ({lib.type})</option>
+                ))}
+              </select>
+              {plexLibraries.length === 0 && (
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Click "Test connection" to load available libraries.</p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <button onClick={handleTestPlex} disabled={testingPlex}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                {testingPlex && <Loader2 className="h-4 w-4 animate-spin" />}
+                Test connection
+              </button>
+              {plexTestResult && (
+                <span className={`flex items-center gap-1.5 text-sm font-medium ${plexTestResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {plexTestResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  {plexTestResult.ok
+                    ? `${plexLibraries.length} librar${plexLibraries.length === 1 ? "y" : "ies"} found`
+                    : plexTestResult.error}
+                </span>
+              )}
+            </div>
+          </div>
+        </Section>
+
+        {/* Jellyfin */}
+        <Section title="Jellyfin">
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Optional. AutoRrent will refresh your Jellyfin library whenever a download completes.
+          </p>
+          <div className="mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={settings.jellyfin_enabled === "true"}
+                onChange={(e) => set("jellyfin_enabled", e.target.checked ? "true" : "false")}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable Jellyfin library refresh</span>
+            </label>
+          </div>
+          <div className={`space-y-3 ${settings.jellyfin_enabled !== "true" ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Jellyfin URL" value={settings.jellyfin_url ?? ""} onChange={(v) => set("jellyfin_url", v)} placeholder="http://192.168.1.100:8096" />
+              <Field label="API key" type="password" value={settings.jellyfin_api_key ?? ""} onChange={(v) => set("jellyfin_api_key", v)} placeholder="Your API key" />
+            </div>
+            <Field
+              label="Library ID"
+              value={settings.jellyfin_library_id ?? ""}
+              onChange={(v) => set("jellyfin_library_id", v)}
+              placeholder="Leave blank to refresh all libraries"
+              hint="The ItemId of a specific library, or leave blank to refresh everything."
+            />
+            <div className="flex items-center gap-3">
+              <button onClick={handleTestJellyfin} disabled={testingJellyfin}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50">
+                {testingJellyfin && <Loader2 className="h-4 w-4 animate-spin" />}
+                Test connection
+              </button>
+              {jellyfinTestResult && (
+                <span className={`flex items-center gap-1.5 text-sm font-medium ${jellyfinTestResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {jellyfinTestResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  {jellyfinTestResult.ok
+                    ? `${jellyfinTestResult.server_name} v${jellyfinTestResult.version}`
+                    : jellyfinTestResult.error}
+                </span>
+              )}
+            </div>
           </div>
         </Section>
 
