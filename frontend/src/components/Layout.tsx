@@ -44,9 +44,9 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
-      {/* Sidebar */}
+      {/* ── Sidebar (md and above) ──────────────────────────────────────────── */}
       <aside
-        className={`flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm transition-all duration-200 shrink-0 ${
+        className={`hidden md:flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm transition-all duration-200 shrink-0 ${
           collapsed ? "w-16" : "w-56"
         }`}
       >
@@ -137,10 +137,35 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-y-auto">
+      {/* ── Main content ────────────────────────────────────────────────────── */}
+      {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
+      {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
+      <main className="flex-1 overflow-y-auto main-scroll">
         <Outlet />
       </main>
+
+      {/* ── Bottom tab bar (mobile only, hidden on md+) ─────────────────────── */}
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 shadow-[0_-1px_3px_rgba(0,0,0,0.08)]"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" } as React.CSSProperties}
+      >
+        {nav.map(({ to, label, icon: Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              `flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium min-h-[52px] transition-colors ${
+                isActive
+                  ? "text-blue-600 dark:text-blue-400"
+                  : "text-gray-500 dark:text-gray-400"
+              }`
+            }
+          >
+            <Icon className="h-5 w-5" />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

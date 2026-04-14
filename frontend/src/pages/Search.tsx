@@ -245,7 +245,7 @@ export default function Search() {
   const CTRL = "rounded-lg border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-sm dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
   return (
-    <div className="p-6">
+    <div className="px-4 py-6 sm:px-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Search Torrents</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Find torrents and send them straight to qBittorrent.</p>
@@ -346,18 +346,18 @@ export default function Search() {
                 <div className="flex shrink-0 items-center gap-2">
                   {r.url && (
                     <a href={r.url} target="_blank" rel="noopener noreferrer"
-                      className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300"
+                      className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300"
                       title="View on site">
                       <ExternalLink className="h-4 w-4" />
                     </a>
                   )}
                   <button onClick={() => setWlTarget(r)}
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                    className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
                     <Plus className="h-3.5 w-3.5" />
                     Watchlist
                   </button>
                   <button onClick={() => setDlTarget(r)}
-                    className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">
+                    className="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">
                     <Download className="h-3.5 w-3.5" />
                     Download
                   </button>
@@ -389,7 +389,7 @@ export default function Search() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-lg bg-gray-900 dark:bg-gray-700 px-4 py-3 text-sm text-white shadow-lg">
+        <div className="fixed bottom-20 right-4 z-50 rounded-lg bg-gray-900 dark:bg-gray-700 px-4 py-3 text-sm text-white shadow-lg md:bottom-6 md:right-6">
           {toast}
         </div>
       )}

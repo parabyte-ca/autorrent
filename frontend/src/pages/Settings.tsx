@@ -199,7 +199,7 @@ export default function Settings() {
   );
 
   return (
-    <div className="p-6 max-w-2xl">
+    <div className="px-4 py-6 sm:px-6 max-w-2xl">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure your qBittorrent connection and preferences.</p>
@@ -474,7 +474,7 @@ export default function Settings() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-lg bg-gray-900 dark:bg-gray-700 px-4 py-3 text-sm text-white shadow-lg">
+        <div className="fixed bottom-20 right-4 z-50 rounded-lg bg-gray-900 dark:bg-gray-700 px-4 py-3 text-sm text-white shadow-lg md:bottom-6 md:right-6">
           {toast}
         </div>
       )}

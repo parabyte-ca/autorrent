@@ -54,9 +54,14 @@ app.include_router(paths.router, prefix="/api")
 if STATIC_DIR.exists():
     app.mount("/assets", StaticFiles(directory=STATIC_DIR / "assets"), name="assets")
 
+    # SW and manifest must not be cached by the browser so updates apply promptly
+    _NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+    _NO_CACHE_FILES = {"sw.js", "manifest.webmanifest"}
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         candidate = STATIC_DIR / full_path
         if candidate.exists() and candidate.is_file():
-            return FileResponse(candidate)
+            headers = _NO_CACHE_HEADERS if full_path in _NO_CACHE_FILES else None
+            return FileResponse(candidate, headers=headers)
         return FileResponse(STATIC_DIR / "index.html")
