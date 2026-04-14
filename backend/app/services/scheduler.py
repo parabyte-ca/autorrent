@@ -167,6 +167,15 @@ def stop_scheduler() -> None:
         _scheduler.shutdown(wait=False)
 
 
+def get_scheduler() -> BackgroundScheduler:
+    """Return the module-level scheduler singleton.
+
+    Exposed so other modules (e.g. the backup router) can pause/resume the
+    scheduler without importing the private ``_scheduler`` name directly.
+    """
+    return _scheduler
+
+
 def update_interval(minutes: int) -> None:
     if _scheduler.running:
         _scheduler.reschedule_job(
