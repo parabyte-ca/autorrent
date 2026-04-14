@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, CheckCircle2, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2 } from "lucide-react";
-import { api, type DownloadPath, type JellyfinTestResult, type PlexLibrary, type PlexTestResult, type Settings as SettingsType } from "../api/client";
+import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
+import { api, type DownloadPath, type JellyfinTestResult, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
@@ -118,6 +118,11 @@ export default function Settings() {
   const [jellyfinTestResult, setJellyfinTestResult] = useState<JellyfinTestResult | null>(null);
   const [testingJellyfin,  setTestingJellyfin]  = useState(false);
   const [health,           setHealth]           = useState<HealthStatus>(null);
+  const [exportingBackup,  setExportingBackup]  = useState(false);
+  const [exportError,      setExportError]      = useState<string | null>(null);
+  const [backupFile,       setBackupFile]       = useState<File | null>(null);
+  const [restoringBackup,  setRestoringBackup]  = useState(false);
+  const [restoreResult,    setRestoreResult]    = useState<RestoreResponse | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -179,6 +184,54 @@ export default function Settings() {
       });
       setJellyfinTestResult(result);
     } finally { setTestingJellyfin(false); }
+  };
+
+  const handleExportBackup = async () => {
+    setExportingBackup(true);
+    setExportError(null);
+    try {
+      const res = await api.backup.export();
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Export failed" }));
+        setExportError(err.detail ?? "Export failed");
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const match = cd.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `autorrent-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setExportError((e as Error).message);
+    } finally {
+      setExportingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!backupFile) return;
+    if (!confirm("This will replace all current settings and data with the contents of the backup. Are you sure?")) return;
+    setRestoringBackup(true);
+    setRestoreResult(null);
+    try {
+      const res = await api.backup.restore(backupFile);
+      const body: RestoreResponse = await res.json().catch(() => ({ ok: false, error: "Unexpected response from server" }));
+      setRestoreResult(body);
+      if (body.ok) {
+        setTimeout(() => window.location.reload(), 2000);
+      }
+    } catch (e: unknown) {
+      setRestoreResult({ ok: false, error: (e as Error).message });
+    } finally {
+      setRestoringBackup(false);
+    }
   };
 
   const handlePathSave = async (data: { name: string; path: string; is_default: boolean }) => {
@@ -457,6 +510,79 @@ export default function Settings() {
             — supports Telegram, Discord, Slack, email, Pushover, and 60+ more. Leave blank to disable.
           </p>
           <Field label="Apprise URL" value={settings.apprise_url ?? ""} onChange={(v) => set("apprise_url", v)} placeholder="tgram://bottoken/ChatID" />
+        </Section>
+
+        {/* Data management */}
+        <Section title="Data management">
+          {/* Export */}
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Export backup</h3>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                Download a ZIP file containing your database and settings. Use this before upgrading or migrating to a new server.
+              </p>
+            </div>
+            <button
+              onClick={handleExportBackup}
+              disabled={exportingBackup}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-60"
+            >
+              {exportingBackup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download backup
+            </button>
+            {exportError && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {exportError}
+              </div>
+            )}
+          </div>
+
+          <div className="my-5 border-t border-gray-100 dark:border-gray-800" />
+
+          {/* Restore */}
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Restore from backup</h3>
+              <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+                Warning: restoring will replace your current database and settings with the contents of the backup. This cannot be undone.
+              </p>
+            </div>
+            <label className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-4 py-3 text-sm transition-colors hover:border-blue-400 dark:hover:border-blue-600">
+              <Upload className="h-4 w-4 shrink-0 text-gray-400" />
+              <span className={backupFile ? "text-gray-800 dark:text-gray-200" : "text-gray-400 dark:text-gray-500"}>
+                {backupFile ? backupFile.name : "Click to select a backup ZIP…"}
+              </span>
+              <input
+                type="file"
+                accept=".zip"
+                className="hidden"
+                onChange={(e) => { setBackupFile(e.target.files?.[0] ?? null); setRestoreResult(null); }}
+              />
+            </label>
+            {backupFile && (
+              <button
+                onClick={handleRestoreBackup}
+                disabled={restoringBackup}
+                className="flex items-center gap-1.5 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950 px-4 py-2 text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900 disabled:opacity-60"
+              >
+                {restoringBackup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Restore
+              </button>
+            )}
+            {restoreResult && (
+              <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                restoreResult.ok
+                  ? "border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400"
+                  : "border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400"
+              }`}>
+                {restoreResult.ok
+                  ? <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  : <AlertCircle className="h-4 w-4 shrink-0" />}
+                {restoreResult.ok ? restoreResult.message : restoreResult.error}
+              </div>
+            )}
+          </div>
         </Section>
 
         {/* Save */}

@@ -95,6 +95,19 @@ export interface JellyfinTestResult {
   version?: string;
 }
 
+export interface BackupMeta {
+  created_at: string;
+  app_version: string;
+  db_path: string;
+}
+
+export interface RestoreResponse {
+  ok: boolean;
+  restored_from?: string;
+  message?: string;
+  error?: string;
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -129,6 +142,19 @@ export const api = {
     update: (id: number, data: Partial<{ name: string; path: string; is_default: boolean }>) =>
       req<DownloadPath>(`/paths/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
+  },
+
+  backup: {
+    /** Fetch the export ZIP; returns the raw Response so the caller can stream
+     *  the blob — do not pass through req<T>() which calls .json(). */
+    export: (): Promise<Response> => fetch(`${BASE}/backup/export`),
+    /** Upload a backup ZIP; returns the raw Response so the caller can inspect
+     *  both success JSON and error JSON without an intermediate throw. */
+    restore: (file: File): Promise<Response> => {
+      const form = new FormData();
+      form.append("file", file);
+      return fetch(`${BASE}/backup/restore`, { method: "POST", body: form });
+    },
   },
 
   settings: {
