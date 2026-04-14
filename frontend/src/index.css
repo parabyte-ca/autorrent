@@ -7,3 +7,13 @@
     @apply bg-gray-50 text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100;
   }
 }
+
+/* Mobile: clear the fixed bottom tab bar + iOS home indicator safe area */
+.main-scroll {
+  padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 768px) {
+  .main-scroll {
+    padding-bottom: 0;
+  }
+}

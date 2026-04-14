@@ -85,7 +85,7 @@ function DownloadRow({ d, onDelete }: { d: DL; onDelete: (id: number) => void })
         </div>
         <button
           onClick={() => onDelete(d.id)}
-          className="shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500"
+          className="flex shrink-0 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500"
           title="Remove from history"
         >
           <Trash2 className="h-4 w-4" />
@@ -138,7 +138,7 @@ export default function Downloads() {
   );
 
   return (
-    <div className="p-6">
+    <div className="px-4 py-6 sm:px-6">
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Downloads</h1>
@@ -179,7 +179,7 @@ export default function Downloads() {
       )}
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-lg bg-gray-900 dark:bg-gray-700 px-4 py-3 text-sm text-white shadow-lg">
+        <div className="fixed bottom-20 right-4 z-50 rounded-lg bg-gray-900 dark:bg-gray-700 px-4 py-3 text-sm text-white shadow-lg md:bottom-6 md:right-6">
           {toast}
         </div>
       )}
