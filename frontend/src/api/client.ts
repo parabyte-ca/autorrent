@@ -40,6 +40,10 @@ export interface WatchlistItem {
   last_checked?: string;
   last_found?: string;
   created_at: string;
+  show_status: "Running" | "Ended" | "To Be Determined" | "In Development" | "Unknown" | null;
+  show_status_checked_at: string | null;
+  tvmaze_id: number | null;
+  show_status_override: boolean;
 }
 
 export interface WatchlistCreate {
@@ -176,6 +180,12 @@ export const api = {
       reset: (id: number) =>
         req<{ deleted: number }>(`/watchlist/${id}/episodes?confirm=true`, { method: "DELETE" }),
     },
+    checkShowStatuses: () =>
+      req<{ ok: boolean; message: string }>("/watchlist/check-show-statuses", { method: "POST" }),
+    setOverride: (id: number) =>
+      req<WatchlistItem>(`/watchlist/${id}/override-status`, { method: "POST" }),
+    removeOverride: (id: number) =>
+      req<WatchlistItem>(`/watchlist/${id}/override-status`, { method: "DELETE" }),
   },
 
   downloads: {

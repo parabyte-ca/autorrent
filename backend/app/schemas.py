@@ -76,6 +76,10 @@ class WatchlistOut(BaseModel):
     last_checked: Optional[datetime] = None
     last_found: Optional[datetime] = None
     created_at: datetime
+    show_status: Optional[str] = None
+    show_status_checked_at: Optional[datetime] = None
+    tvmaze_id: Optional[int] = None
+    show_status_override: bool = False
 
     model_config = {"from_attributes": True}
 

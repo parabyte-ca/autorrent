@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -8,6 +9,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   Tv,
   XCircle,
@@ -36,6 +38,35 @@ function fmtDate(d?: string) {
 }
 function epLabel(s: number, e: number) {
   return `S${String(s).padStart(2, "0")}E${String(e).padStart(2, "0")}`;
+}
+function fmtAgo(d?: string | null) {
+  if (!d) return null;
+  const diff = Date.now() - new Date(d).getTime();
+  const days = Math.floor(diff / 86_400_000);
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 8) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+function ShowStatusBadge({ status }: { status: WatchlistItem["show_status"] }) {
+  if (!status) return null;
+  const cfg: Record<string, { cls: string; label: string }> = {
+    Running:           { cls: "bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/60", label: "Running" },
+    Ended:             { cls: "bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-700/60", label: "Ended" },
+    "To Be Determined":{ cls: "bg-yellow-100 dark:bg-yellow-900/60 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-700/60", label: "TBD" },
+    "In Development":  { cls: "bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700/60", label: "In Dev" },
+    Unknown:           { cls: "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 border-gray-200 dark:border-gray-700", label: "Unknown" },
+  };
+  const { cls, label } = cfg[status] ?? cfg["Unknown"];
+  return (
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium border ${cls}`}>
+      {label}
+    </span>
+  );
 }
 
 // ── Form modal ────────────────────────────────────────────────────────────────
@@ -121,7 +152,7 @@ function FormModal({ initial, paths, onClose, onSave }: {
 
 // ── Watchlist card with episode tracking ──────────────────────────────────────
 
-function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDelete }: {
+function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDelete, onRefresh }: {
   item: WatchlistItem;
   paths: DownloadPath[];
   scanning: number | "all" | null;
@@ -129,15 +160,17 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
   onScan: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onRefresh: () => void;
 }) {
-  const [expanded,     setExpanded]     = useState(false);
-  const [episodes,     setEpisodes]     = useState<WatchlistEpisode[] | null>(null);
-  const [loadingEps,   setLoadingEps]   = useState(false);
-  const [markOpen,     setMarkOpen]     = useState(false);
-  const [markSeason,   setMarkSeason]   = useState(item.season);
-  const [markEpisode,  setMarkEpisode]  = useState(item.episode);
-  const [markMsg,      setMarkMsg]      = useState<{ ok: boolean; text: string } | null>(null);
-  const [resetConfirm, setResetConfirm] = useState(false);
+  const [expanded,       setExpanded]       = useState(false);
+  const [episodes,       setEpisodes]       = useState<WatchlistEpisode[] | null>(null);
+  const [loadingEps,     setLoadingEps]     = useState(false);
+  const [markOpen,       setMarkOpen]       = useState(false);
+  const [markSeason,     setMarkSeason]     = useState(item.season);
+  const [markEpisode,    setMarkEpisode]    = useState(item.episode);
+  const [markMsg,        setMarkMsg]        = useState<{ ok: boolean; text: string } | null>(null);
+  const [resetConfirm,   setResetConfirm]   = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
 
   const pathName = (id?: number) => paths.find((p) => p.id === id)?.name ?? "Default";
 
@@ -189,6 +222,30 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
     }
   };
 
+  const handleCheckStatus = async () => {
+    setCheckingStatus(true);
+    try {
+      await api.watchlist.checkShowStatuses();
+      onRefresh();
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const handleResumeAnyway = async () => {
+    try {
+      await api.watchlist.setOverride(item.id);
+      onRefresh();
+    } catch { /* ignore */ }
+  };
+
+  const handleKeepPaused = async () => {
+    try {
+      await api.watchlist.removeOverride(item.id);
+      onRefresh();
+    } catch { /* ignore */ }
+  };
+
   // Group downloaded episodes by season for display
   const bySeason = (episodes ?? []).reduce<Record<number, WatchlistEpisode[]>>((acc, ep) => {
     (acc[ep.season] ??= []).push(ep);
@@ -201,10 +258,37 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
     <div
       className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm transition-opacity ${item.enabled ? "" : "opacity-60"}`}
     >
+      {/* Ended alert banner */}
+      {item.show_status === "Ended" && !item.enabled && (
+        <div className="mb-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2.5 text-xs">
+          <div className="mb-1.5 flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Show ended — auto-paused
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleKeepPaused}
+              className="rounded bg-amber-200 dark:bg-amber-800 px-2 py-0.5 font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-300 dark:hover:bg-amber-700"
+            >
+              Keep paused
+            </button>
+            <button
+              onClick={handleResumeAnyway}
+              className="rounded px-2 py-0.5 text-amber-600 dark:text-amber-400 hover:underline"
+            >
+              Resume anyway
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
+            <ShowStatusBadge status={item.show_status} />
+          </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
             Looking for: {epLabel(item.season, item.episode)}
           </p>
@@ -237,6 +321,12 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
             Last found: {fmtDate(item.last_found)}
           </div>
         )}
+        {item.show_status_checked_at && (
+          <div className="flex items-center gap-1">
+            <Tv className="h-3 w-3" />
+            Status checked: {fmtAgo(item.show_status_checked_at)}
+          </div>
+        )}
       </div>
 
       {/* Actions */}
@@ -248,6 +338,14 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
         >
           {scanning === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           Scan now
+        </button>
+        <button
+          onClick={handleCheckStatus}
+          disabled={checkingStatus}
+          title="Check show status on TVMaze"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+        >
+          {checkingStatus ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
         </button>
         <button onClick={onEdit}
           className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
@@ -507,6 +605,7 @@ export default function Watchlist() {
               onScan={() => handleScan(item.id)}
               onEdit={() => setModal(item)}
               onDelete={() => handleDelete(item.id)}
+              onRefresh={load}
             />
           ))}
         </div>

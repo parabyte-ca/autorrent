@@ -20,6 +20,11 @@ class WatchlistItem(Base):
     last_found = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
+    show_status = Column(String, nullable=True)
+    show_status_checked_at = Column(DateTime, nullable=True)
+    tvmaze_id = Column(Integer, nullable=True)
+    show_status_override = Column(Boolean, default=False, server_default="0")
+
     episodes = relationship(
         "WatchlistEpisode",
         back_populates="watchlist_item",

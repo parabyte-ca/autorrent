@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from datetime import datetime
 
@@ -54,6 +55,14 @@ def delete_watchlist_item(item_id: int, db: Session = Depends(get_db)):
     db.delete(db_item)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/watchlist/check-show-statuses")
+async def trigger_show_status_check(db: Session = Depends(get_db)):
+    """Immediately check TVMaze status for all active watchlist items."""
+    from ..services.scheduler import _check_statuses_async
+    await _check_statuses_async(db)
+    return {"ok": True, "message": "Show status check complete"}
 
 
 @router.post("/watchlist/{item_id}/scan")
@@ -162,3 +171,34 @@ def delete_episode(item_id: int, episode_id: int, db: Session = Depends(get_db))
     db.delete(ep)
     db.commit()
     return Response(status_code=204)
+
+
+# ── Show-status override ──────────────────────────────────────────────────────
+
+
+@router.post("/watchlist/{item_id}/override-status", response_model=WatchlistOut)
+def set_status_override(item_id: int, db: Session = Depends(get_db)):
+    """Mark item as override — auto-pause won't fire even if show has ended.
+
+    Also re-enables the item so it resumes scanning immediately.
+    """
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.show_status_override = True
+    item.enabled = True
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/watchlist/{item_id}/override-status", response_model=WatchlistOut)
+def remove_status_override(item_id: int, db: Session = Depends(get_db)):
+    """Remove override — auto-pause will fire again on the next status check."""
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.show_status_override = False
+    db.commit()
+    db.refresh(item)
+    return item

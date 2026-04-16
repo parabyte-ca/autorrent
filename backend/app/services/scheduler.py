@@ -1,7 +1,9 @@
+import asyncio
 import logging
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger(__name__)
@@ -170,6 +172,67 @@ def scan_watchlist() -> None:
     _cleanup_completed()
 
 
+async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
+    """Check TVMaze show status for watchlist items and auto-pause ended shows."""
+    from ..models import Setting, WatchlistItem
+    from .apprise_notify import notify
+    from .tvmaze import get_show_status
+
+    settings = {s.key: s.value for s in db.query(Setting).all()}
+    apprise_url = settings.get("apprise_url", "")
+
+    query = db.query(WatchlistItem).filter(WatchlistItem.enabled == True)
+    if item_id is not None:
+        query = query.filter(WatchlistItem.id == item_id)
+    items = query.all()
+
+    logger.info("Show status check started — %d item(s)", len(items))
+
+    for item in items:
+        try:
+            status, tvmaze_id = await get_show_status(item.title, item.tvmaze_id)
+
+            item.show_status_checked_at = datetime.utcnow()
+
+            if status != "Unknown":
+                item.show_status = status
+            if tvmaze_id is not None:
+                item.tvmaze_id = tvmaze_id
+
+            if status == "Ended" and not item.show_status_override:
+                item.enabled = False
+                db.commit()
+                logger.info(
+                    "Auto-paused watchlist item %d (%r) — show has ended",
+                    item.id, item.title,
+                )
+                notify(
+                    apprise_url,
+                    title=f"AutoRrent — {item.title}",
+                    body=f"{item.title} has ended — auto-paused on watchlist.",
+                )
+            else:
+                db.commit()
+
+        except Exception as exc:
+            logger.error("Status check failed for item %d: %s", item.id, exc)
+
+    logger.info("Show status check complete")
+
+
+def check_show_statuses(item_id: int | None = None) -> None:
+    """Sync wrapper — safe to call from APScheduler threads."""
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        asyncio.run(_check_statuses_async(db, item_id=item_id))
+    except Exception as exc:
+        logger.error("check_show_statuses failed: %s", exc)
+    finally:
+        db.close()
+
+
 def _cleanup_completed() -> None:
     """Remove completed (seeding) torrents from qBittorrent if the setting is enabled."""
     from ..database import SessionLocal
@@ -220,6 +283,12 @@ def start_scheduler() -> None:
         scan_watchlist,
         trigger=IntervalTrigger(minutes=interval),
         id="watchlist_scan",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        check_show_statuses,
+        trigger=CronTrigger(day_of_week="sun", hour=3, minute=0, timezone="UTC"),
+        id="show_status_check",
         replace_existing=True,
     )
     _scheduler.start()
