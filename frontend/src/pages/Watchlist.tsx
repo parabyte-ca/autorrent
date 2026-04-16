@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   CheckCircle2,
+  ChevronDown,
   Clock,
   Edit2,
   Loader2,
@@ -11,7 +12,14 @@ import {
   Tv,
   XCircle,
 } from "lucide-react";
-import { api, type DownloadPath, type WatchlistCreate, type WatchlistItem } from "../api/client";
+import {
+  api,
+  type DownloadPath,
+  type MarkEpisodeRequest,
+  type WatchlistCreate,
+  type WatchlistEpisode,
+  type WatchlistItem,
+} from "../api/client";
 
 const QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
@@ -111,6 +119,297 @@ function FormModal({ initial, paths, onClose, onSave }: {
   );
 }
 
+// ── Watchlist card with episode tracking ──────────────────────────────────────
+
+function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDelete }: {
+  item: WatchlistItem;
+  paths: DownloadPath[];
+  scanning: number | "all" | null;
+  onToggle: () => void;
+  onScan: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const [expanded,     setExpanded]     = useState(false);
+  const [episodes,     setEpisodes]     = useState<WatchlistEpisode[] | null>(null);
+  const [loadingEps,   setLoadingEps]   = useState(false);
+  const [markOpen,     setMarkOpen]     = useState(false);
+  const [markSeason,   setMarkSeason]   = useState(item.season);
+  const [markEpisode,  setMarkEpisode]  = useState(item.episode);
+  const [markMsg,      setMarkMsg]      = useState<{ ok: boolean; text: string } | null>(null);
+  const [resetConfirm, setResetConfirm] = useState(false);
+
+  const pathName = (id?: number) => paths.find((p) => p.id === id)?.name ?? "Default";
+
+  const fetchEpisodes = async () => {
+    setLoadingEps(true);
+    try {
+      setEpisodes(await api.watchlist.episodes.list(item.id));
+    } catch {
+      setEpisodes([]);
+    } finally {
+      setLoadingEps(false);
+    }
+  };
+
+  const handleExpand = () => {
+    if (!expanded && episodes === null) fetchEpisodes();
+    setExpanded((v) => !v);
+  };
+
+  const handleMark = async () => {
+    const req: MarkEpisodeRequest = { season: markSeason, episode: markEpisode };
+    try {
+      await api.watchlist.episodes.mark(item.id, req);
+      setMarkMsg({ ok: true, text: `Marked ${epLabel(markSeason, markEpisode)} as downloaded.` });
+      setMarkOpen(false);
+      fetchEpisodes();
+    } catch (err) {
+      setMarkMsg({ ok: false, text: err instanceof Error ? err.message : "Failed to mark episode." });
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      const result = await api.watchlist.episodes.reset(item.id);
+      setEpisodes([]);
+      setResetConfirm(false);
+      setMarkMsg({ ok: true, text: `Cleared ${result.deleted} episode record(s).` });
+    } catch {
+      setMarkMsg({ ok: false, text: "Failed to reset episode tracking." });
+    }
+  };
+
+  const handleDeleteEp = async (episodeId: number) => {
+    try {
+      await api.watchlist.episodes.deleteOne(item.id, episodeId);
+      setEpisodes((prev) => prev?.filter((e) => e.id !== episodeId) ?? null);
+    } catch {
+      setMarkMsg({ ok: false, text: "Failed to delete episode record." });
+    }
+  };
+
+  // Group downloaded episodes by season for display
+  const bySeason = (episodes ?? []).reduce<Record<number, WatchlistEpisode[]>>((acc, ep) => {
+    (acc[ep.season] ??= []).push(ep);
+    return acc;
+  }, {});
+
+  const epCount = episodes?.length ?? 0;
+
+  return (
+    <div
+      className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm transition-opacity ${item.enabled ? "" : "opacity-60"}`}
+    >
+      {/* Header */}
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div>
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Looking for: {epLabel(item.season, item.episode)}
+          </p>
+        </div>
+        <button
+          onClick={onToggle}
+          title={item.enabled ? "Disable" : "Enable"}
+          className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full transition-colors ${item.enabled ? "text-green-500 hover:text-green-700" : "text-gray-300 dark:text-gray-600 hover:text-gray-500"}`}
+        >
+          {item.enabled
+            ? <CheckCircle2 className="h-5 w-5" />
+            : <XCircle className="h-5 w-5" />}
+        </button>
+      </div>
+
+      {/* Details */}
+      <div className="mb-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex flex-wrap gap-3">
+          <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{item.quality}</strong></span>
+          <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{item.codec ?? "x265"}</strong></span>
+          <span>Save to: <strong className="text-gray-700 dark:text-gray-300">{pathName(item.download_path_id)}</strong></span>
+        </div>
+        <div className="flex items-center gap-1">
+          <Clock className="h-3 w-3" />
+          Checked: {fmtDate(item.last_checked ?? undefined)}
+        </div>
+        {item.last_found && (
+          <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
+            <CheckCircle2 className="h-3 w-3" />
+            Last found: {fmtDate(item.last_found)}
+          </div>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-2">
+        <button
+          onClick={onScan}
+          disabled={scanning !== null}
+          className="flex flex-1 min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+        >
+          {scanning === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+          Scan now
+        </button>
+        <button onClick={onEdit}
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+          title="Edit">
+          <Edit2 className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={onDelete}
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-red-200 dark:border-red-900 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
+          title="Delete">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* ── Episode tracking section ─────────────────────────────────────── */}
+      <div className="mt-3 border-t border-gray-100 dark:border-gray-800 pt-3">
+        <button
+          onClick={handleExpand}
+          className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+        >
+          <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${expanded ? "rotate-180" : ""}`} />
+          Episodes{episodes !== null ? ` (${epCount})` : ""}
+        </button>
+
+        {expanded && (
+          <div className="mt-2 space-y-2">
+            {/* Loading */}
+            {loadingEps && (
+              <div className="flex items-center gap-1.5 py-1 text-xs text-gray-400">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading…
+              </div>
+            )}
+
+            {/* Episode grid */}
+            {!loadingEps && episodes !== null && episodes.length === 0 && (
+              <p className="py-1 text-xs text-gray-400 dark:text-gray-600">No episodes tracked yet.</p>
+            )}
+
+            {!loadingEps && Object.keys(bySeason).length > 0 && (
+              <div className="space-y-2">
+                {Object.entries(bySeason)
+                  .sort(([a], [b]) => Number(a) - Number(b))
+                  .map(([season, eps]) => (
+                    <div key={season}>
+                      <div className="mb-1 text-xs font-medium text-gray-400 dark:text-gray-500">
+                        Season {season}
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {eps
+                          .sort((a, b) => a.episode - b.episode)
+                          .map((ep) => (
+                            <button
+                              key={ep.id}
+                              title={[
+                                ep.torrent_name ?? epLabel(ep.season, ep.episode),
+                                `Downloaded: ${new Date(ep.downloaded_at).toLocaleString()}`,
+                                "Click to remove",
+                              ].join("\n")}
+                              onClick={() => handleDeleteEp(ep.id)}
+                              className="rounded px-1.5 py-0.5 text-xs font-medium bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-700/60 hover:bg-red-100 dark:hover:bg-red-900/50 hover:border-red-300 dark:hover:border-red-700 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                            >
+                              E{String(ep.episode).padStart(2, "0")}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {/* Feedback message */}
+            {markMsg && (
+              <p className={`text-xs ${markMsg.ok ? "text-green-600 dark:text-green-400" : "text-red-500 dark:text-red-400"}`}>
+                {markMsg.text}
+              </p>
+            )}
+
+            {/* Mark episode form */}
+            {markOpen && (
+              <div className="flex flex-wrap items-end gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-2">
+                <div>
+                  <label className="mb-0.5 block text-xs text-gray-500 dark:text-gray-400">Season</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={markSeason}
+                    onChange={(e) => setMarkSeason(Number(e.target.value))}
+                    className="w-16 rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-0.5 block text-xs text-gray-500 dark:text-gray-400">Episode</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={markEpisode}
+                    onChange={(e) => setMarkEpisode(Number(e.target.value))}
+                    className="w-16 rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-xs dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={handleMark}
+                  className="rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                >
+                  Mark
+                </button>
+                <button
+                  onClick={() => { setMarkOpen(false); setMarkMsg(null); }}
+                  className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {/* Reset confirmation */}
+            {resetConfirm && (
+              <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/50 p-2 text-xs">
+                <p className="mb-2 text-red-700 dark:text-red-300">
+                  This will allow all episodes to be re-downloaded. Are you sure?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleReset}
+                    className="rounded bg-red-600 px-2.5 py-1 font-medium text-white hover:bg-red-700"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    onClick={() => setResetConfirm(false)}
+                    className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Action links */}
+            {!markOpen && !resetConfirm && (
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setMarkOpen(true); setMarkMsg(null); setMarkSeason(item.season); setMarkEpisode(item.episode); }}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  + Mark episode
+                </button>
+                <button
+                  onClick={() => { setResetConfirm(true); setMarkMsg(null); }}
+                  className="text-xs text-red-500 dark:text-red-400 hover:underline"
+                >
+                  Reset tracking
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Watchlist() {
@@ -156,8 +455,6 @@ export default function Watchlist() {
     } finally { setScanning(null); }
   };
 
-  const pathName = (id?: number) => paths.find((p) => p.id === id)?.name ?? "Default";
-
   if (loading) return (
     <div className="flex h-full items-center justify-center">
       <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
@@ -201,69 +498,16 @@ export default function Watchlist() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => (
-            <div key={item.id}
-              className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm transition-opacity ${item.enabled ? "" : "opacity-60"}`}
-            >
-              {/* Header */}
-              <div className="mb-3 flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Looking for: {epLabel(item.season, item.episode)}
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleToggle(item)}
-                  title={item.enabled ? "Disable" : "Enable"}
-                  className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full transition-colors ${item.enabled ? "text-green-500 hover:text-green-700" : "text-gray-300 dark:text-gray-600 hover:text-gray-500"}`}
-                >
-                  {item.enabled
-                    ? <CheckCircle2 className="h-5 w-5" />
-                    : <XCircle className="h-5 w-5" />}
-                </button>
-              </div>
-
-              {/* Details */}
-              <div className="mb-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
-                <div className="flex flex-wrap gap-3">
-                  <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{item.quality}</strong></span>
-                  <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{item.codec ?? "x265"}</strong></span>
-                  <span>Save to: <strong className="text-gray-700 dark:text-gray-300">{pathName(item.download_path_id)}</strong></span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  Checked: {fmtDate(item.last_checked ?? undefined)}
-                </div>
-                {item.last_found && (
-                  <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Last found: {fmtDate(item.last_found)}
-                  </div>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleScan(item.id)}
-                  disabled={scanning !== null}
-                  className="flex flex-1 min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
-                >
-                  {scanning === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-                  Scan now
-                </button>
-                <button onClick={() => setModal(item)}
-                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-xs text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
-                  title="Edit">
-                  <Edit2 className="h-3.5 w-3.5" />
-                </button>
-                <button onClick={() => handleDelete(item.id)}
-                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-red-200 dark:border-red-900 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950"
-                  title="Delete">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
+            <WatchlistCard
+              key={item.id}
+              item={item}
+              paths={paths}
+              scanning={scanning}
+              onToggle={() => handleToggle(item)}
+              onScan={() => handleScan(item.id)}
+              onEdit={() => setModal(item)}
+              onDelete={() => handleDelete(item.id)}
+            />
           ))}
         </div>
       )}

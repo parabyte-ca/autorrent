@@ -129,6 +129,22 @@ export interface HistoryResponse {
   total: number;
 }
 
+export interface WatchlistEpisode {
+  id: number;
+  watchlist_id: number;
+  season: number;
+  episode: number;
+  downloaded_at: string;       // ISO 8601 with Z suffix
+  torrent_hash: string | null;
+  torrent_name: string | null;
+}
+
+export interface MarkEpisodeRequest {
+  season: number;
+  episode: number;
+  torrent_name?: string;
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -147,6 +163,19 @@ export const api = {
     delete: (id: number) => req(`/watchlist/${id}`, { method: "DELETE" }),
     scan: (id: number) => req(`/watchlist/${id}/scan`, { method: "POST" }),
     scanAll: () => req("/scan", { method: "POST" }),
+    episodes: {
+      list: (id: number) =>
+        req<WatchlistEpisode[]>(`/watchlist/${id}/episodes`),
+      mark: (id: number, data: MarkEpisodeRequest) =>
+        req<WatchlistEpisode>(`/watchlist/${id}/episodes`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        }),
+      deleteOne: (watchlistId: number, episodeId: number) =>
+        req(`/watchlist/${watchlistId}/episodes/${episodeId}`, { method: "DELETE" }),
+      reset: (id: number) =>
+        req<{ deleted: number }>(`/watchlist/${id}/episodes?confirm=true`, { method: "DELETE" }),
+    },
   },
 
   downloads: {

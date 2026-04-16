@@ -10,8 +10,9 @@ _scheduler = BackgroundScheduler(timezone="UTC")
 
 def scan_watchlist() -> None:
     """Scan all enabled watchlist items and auto-download new episodes."""
+    from sqlalchemy.exc import IntegrityError
     from ..database import SessionLocal
-    from ..models import Download, DownloadHistory, DownloadPath, Setting, WatchlistItem
+    from ..models import Download, DownloadHistory, DownloadPath, Setting, WatchlistEpisode, WatchlistItem
     from .apprise_notify import notify
     from .indexers import search_all
     from .qbittorrent import add_torrent
@@ -32,6 +33,26 @@ def scan_watchlist() -> None:
 
             try:
                 query = f"{item.search_query} S{item.season:02d}E{item.episode:02d}"
+
+                # Skip if this S/E was already recorded in the persistent episode table.
+                # This is the primary deduplication guard and survives torrent removal
+                # from qBittorrent.
+                already_ep = (
+                    db.query(WatchlistEpisode)
+                    .filter_by(
+                        watchlist_id=item.id,
+                        season=item.season,
+                        episode=item.episode,
+                    )
+                    .first()
+                )
+                if already_ep:
+                    logger.debug(
+                        "Episode already tracked: watchlist_id=%d S%02dE%02d — skipping",
+                        item.id, item.season, item.episode,
+                    )
+                    continue
+
                 results = search_all(
                     query,
                     quality=item.quality,
@@ -46,7 +67,8 @@ def scan_watchlist() -> None:
 
                 best = max(results, key=lambda r: r["seeds"])
 
-                # Skip if already tracked
+                # Secondary guard: skip if a Download record already tracks this episode
+                # (handles the case where the episode is actively downloading).
                 ep_tag = f"S{item.season:02d}E{item.episode:02d}"
                 existing = (
                     db.query(Download)
@@ -70,6 +92,10 @@ def scan_watchlist() -> None:
                     if dp:
                         save_path = dp.path
 
+                # Capture S/E before incrementing so the record reflects what was downloaded.
+                downloaded_season = item.season
+                downloaded_episode = item.episode
+
                 info_hash = add_torrent(best["magnet"], save_path, category)
 
                 dl = Download(
@@ -86,6 +112,26 @@ def scan_watchlist() -> None:
                 item.episode += 1
                 item.last_found = datetime.utcnow()
                 db.commit()
+
+                # Record the episode as downloaded — best-effort, must not block the scan.
+                try:
+                    ep = WatchlistEpisode(
+                        watchlist_id=item.id,
+                        season=downloaded_season,
+                        episode=downloaded_episode,
+                        torrent_hash=info_hash,
+                        torrent_name=best["title"],
+                    )
+                    db.add(ep)
+                    db.commit()
+                except IntegrityError:
+                    db.rollback()
+                    logger.warning(
+                        "WatchlistEpisode duplicate skipped: watchlist_id=%d S%02dE%02d",
+                        item.id, downloaded_season, downloaded_episode,
+                    )
+                except Exception as ep_err:
+                    logger.error("Failed to write WatchlistEpisode: %s", ep_err)
 
                 # Write history record — best-effort; must not raise or delay the scan.
                 try:
