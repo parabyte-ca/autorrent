@@ -1,10 +1,10 @@
-# AutoRrent
+# AuTorrent
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
 **v1.3** — Global download history log with search, filtering, CSV export, and per-entry deletion. Backup and restore the full database from Settings. Plex and Jellyfin library refresh on download completion, Docker healthcheck, and a live system status indicator.
 
-AutoRrent connects to your existing [qBittorrent](https://www.qbittorrent.org/) instance and gives it a friendlier face. Search across multiple torrent indexers, send downloads straight to qBittorrent with a folder picker, and set up a watchlist that tracks TV shows and automatically grabs new episodes the moment they appear — no manual checking required.
+AuTorrent connects to your existing [qBittorrent](https://www.qbittorrent.org/) instance and gives it a friendlier face. Search across multiple torrent indexers, send downloads straight to qBittorrent with a folder picker, and set up a watchlist that tracks TV shows and automatically grabs new episodes the moment they appear — no manual checking required.
 
 Everything is configured through the UI. No config files, no command line, no YAML.
 
@@ -20,7 +20,7 @@ Everything is configured through the UI. No config files, no command line, no YA
 - One-click **Download** with a folder picker, or **Add to Watchlist** to start tracking a show
 
 ### Watchlist
-- Track TV shows by season and episode — AutoRrent searches for the next episode and downloads it automatically
+- Track TV shows by season and episode — AuTorrent searches for the next episode and downloads it automatically
 - Set a preferred **quality** and **codec** per show
 - Choose which NAS folder each show downloads to
 - Enable or disable tracking per show without deleting it
@@ -54,7 +54,7 @@ Everything is configured through the UI. No config files, no command line, no YA
 
 ### Backup & Restore
 - **Export** a ZIP from Settings containing your SQLite database, all settings, and a metadata file — one click, no command line
-- **Restore** by uploading a backup ZIP; AutoRrent atomically swaps the database with zero data loss
+- **Restore** by uploading a backup ZIP; AuTorrent atomically swaps the database with zero data loss
 - The scheduler is paused for the duration of the restore and resumes automatically
 
 ### Self-Hosted & Simple
@@ -70,8 +70,8 @@ Everything is configured through the UI. No config files, no command line, no YA
 **Requirements:** Docker and Docker Compose on your server.
 
 ```bash
-git clone https://github.com/parabyte-ca/autorrent.git
-cd autorrent
+git clone https://github.com/parabyte-ca/AuTorrent.git
+cd AuTorrent
 docker compose up -d
 ```
 
@@ -110,7 +110,7 @@ Set one as the **default** so it's pre-selected when you download something with
 
 ### 3. (Optional) Connect Jackett or Prowlarr
 
-AutoRrent ships with NYAA and TPB built in. If you already run [Jackett](https://github.com/Jackett/Jackett) or [Prowlarr](https://github.com/Prowlarr/Prowlarr), paste in the URL and API key to add support for hundreds of additional indexers.
+AuTorrent ships with NYAA and TPB built in. If you already run [Jackett](https://github.com/Jackett/Jackett) or [Prowlarr](https://github.com/Prowlarr/Prowlarr), paste in the URL and API key to add support for hundreds of additional indexers.
 
 ### 4. (Optional) Set Up Notifications
 
@@ -128,7 +128,7 @@ Paste an [Apprise URL](https://github.com/caronc/apprise#supported-notifications
 
 Enable the **Plex** or **Jellyfin** section in Settings and fill in your server details. Click **Test connection** to verify — Plex will also populate a library dropdown so you can target a specific section.
 
-Once enabled, AutoRrent automatically pings your media server to trigger a library scan each time a torrent finishes downloading.
+Once enabled, AuTorrent automatically pings your media server to trigger a library scan each time a torrent finishes downloading.
 
 ---
 
@@ -145,13 +145,13 @@ Once enabled, AutoRrent automatically pings your media server to trigger a libra
 
 1. Go to **Watchlist** → **Add show**
 2. Enter the show title, the search query (what to search for), your preferred quality and codec, and the season/episode to start from
-3. AutoRrent will automatically search for and download the next episode on each scan cycle (default: every 60 minutes)
+3. AuTorrent will automatically search for and download the next episode on each scan cycle (default: every 60 minutes)
 4. Hit **Scan now** on a card to check immediately without waiting for the next cycle
 5. Use the toggle on each card to pause or resume tracking at any time
 
 ### Downloads
 
-All downloads added through AutoRrent appear here. Active downloads show a live progress bar, speed, and ETA. The page refreshes automatically every 10 seconds.
+All downloads added through AuTorrent appear here. Active downloads show a live progress bar, speed, and ETA. The page refreshes automatically every 10 seconds.
 
 ### History
 
@@ -161,9 +161,9 @@ Every torrent sent to qBittorrent — whether triggered manually from the Search
 
 ## NAS / Docker Path Setup
 
-AutoRrent tells qBittorrent where to save files. The path you enter must be valid **from qBittorrent's perspective** — if qBittorrent is running in Docker, use the path inside that container.
+AuTorrent tells qBittorrent where to save files. The path you enter must be valid **from qBittorrent's perspective** — if qBittorrent is running in Docker, use the path inside that container.
 
-To mount your NAS into the AutoRrent container (useful for path validation or future features), uncomment the relevant line in `docker-compose.yml`:
+To mount your NAS into the AuTorrent container (useful for path validation or future features), uncomment the relevant line in `docker-compose.yml`:
 
 ```yaml
 volumes:
@@ -182,7 +182,7 @@ All settings are managed through the Settings page. The table below documents ea
 | qBittorrent host | `localhost` | IP or hostname of your qBittorrent instance |
 | qBittorrent port | `8080` | Port qBittorrent's Web UI is running on |
 | Username / Password | `admin` / — | qBittorrent Web UI credentials |
-| Category | `autorrent` | qBittorrent category label applied to all AutoRrent downloads |
+| Category | `AuTorrent` | qBittorrent category label applied to all AuTorrent downloads |
 | Scan interval | `60` min | How often the watchlist scanner runs |
 | Minimum seeds | `3` | Results with fewer seeds than this are ignored |
 | Remove on complete | off | Remove the torrent entry from qBittorrent when seeding begins (files are kept) |
@@ -237,7 +237,7 @@ environment:
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-DATABASE_URL=sqlite:///./data/autorrent.db uvicorn app.main:app --reload --port 8000
+DATABASE_URL=sqlite:///./data/AuTorrent.db uvicorn app.main:app --reload --port 8000
 ```
 
 ```bash
@@ -258,7 +258,7 @@ python -m pytest tests/ -v
 ### Project Structure
 
 ```
-autorrent/
+AuTorrent/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py              # FastAPI app, lifespan, static file serving
