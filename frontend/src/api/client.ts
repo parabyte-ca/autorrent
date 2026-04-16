@@ -108,6 +108,27 @@ export interface RestoreResponse {
   error?: string;
 }
 
+export interface DownloadHistoryItem {
+  id: number;
+  name: string;
+  source: "manual" | "watchlist";
+  indexer: string | null;
+  folder: string | null;
+  torrent_hash: string | null;
+  size_bytes: number | null;
+  size_human: string;
+  added_at: string;        // ISO 8601 with Z suffix
+  completed_at: string | null;
+  status: "downloading" | "completed" | "failed";
+  watchlist_id: number | null;
+  error_msg: string | null;
+}
+
+export interface HistoryResponse {
+  items: DownloadHistoryItem[];
+  total: number;
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -130,9 +151,17 @@ export const api = {
 
   downloads: {
     list: () => req<Download[]>("/downloads"),
-    add: (data: { magnet: string; title: string; download_path_id?: number }) =>
+    add: (data: { magnet: string; title: string; download_path_id?: number; indexer?: string }) =>
       req("/downloads", { method: "POST", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/downloads/${id}`, { method: "DELETE" }),
+  },
+
+  history: {
+    list: (params: string) => req<HistoryResponse>(`/history?${params}`),
+    /** Fetch the full history as a CSV file; returns a raw Response. */
+    export: (): Promise<Response> => fetch(`${BASE}/history/export`),
+    deleteOne: (id: number) => req(`/history/${id}`, { method: "DELETE" }),
+    clearAll: () => req<{ deleted: number }>("/history?confirm=true", { method: "DELETE" }),
   },
 
   paths: {

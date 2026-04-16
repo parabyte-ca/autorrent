@@ -11,7 +11,7 @@ _scheduler = BackgroundScheduler(timezone="UTC")
 def scan_watchlist() -> None:
     """Scan all enabled watchlist items and auto-download new episodes."""
     from ..database import SessionLocal
-    from ..models import Download, DownloadPath, Setting, WatchlistItem
+    from ..models import Download, DownloadHistory, DownloadPath, Setting, WatchlistItem
     from .apprise_notify import notify
     from .indexers import search_all
     from .qbittorrent import add_torrent
@@ -86,6 +86,24 @@ def scan_watchlist() -> None:
                 item.episode += 1
                 item.last_found = datetime.utcnow()
                 db.commit()
+
+                # Write history record — best-effort; must not raise or delay the scan.
+                try:
+                    hist = DownloadHistory(
+                        name=best["title"],
+                        source="watchlist",
+                        # best["source"] is the indexer slug, e.g. "nyaa", "tpb"
+                        indexer=best.get("source"),
+                        folder=dp.name if dp else None,
+                        torrent_hash=info_hash,
+                        size_bytes=best.get("size_bytes"),
+                        status="downloading",
+                        watchlist_id=item.id,
+                    )
+                    db.add(hist)
+                    db.commit()
+                except Exception as hist_err:
+                    logger.error("Failed to write watchlist download history: %s", hist_err)
 
                 logger.info("Auto-downloaded: %s", best["title"])
                 notify(

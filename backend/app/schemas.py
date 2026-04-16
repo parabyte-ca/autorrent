@@ -87,6 +87,9 @@ class DownloadCreate(BaseModel):
     title: str
     download_path_id: Optional[int] = None
     watchlist_id: Optional[int] = None
+    # Indexer the torrent came from (e.g. "nyaa", "tpb") — passed from the
+    # Search page so it can be recorded in the download history.
+    indexer: Optional[str] = None
 
 
 # ── Media server test connections ─────────────────────────────────────────────

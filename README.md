@@ -2,7 +2,7 @@
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
-**v1.2** — Plex and Jellyfin library refresh on download completion, Docker healthcheck, and a live system status indicator in Settings.
+**v1.3** — Global download history log with search, filtering, CSV export, and per-entry deletion. Backup and restore the full database from Settings. Plex and Jellyfin library refresh on download completion, Docker healthcheck, and a live system status indicator.
 
 AutoRrent connects to your existing [qBittorrent](https://www.qbittorrent.org/) instance and gives it a friendlier face. Search across multiple torrent indexers, send downloads straight to qBittorrent with a folder picker, and set up a watchlist that tracks TV shows and automatically grabs new episodes the moment they appear — no manual checking required.
 
@@ -51,6 +51,11 @@ Everything is configured through the UI. No config files, no command line, no YA
 - **Collapsible sidebar** — collapse the nav to icons-only to maximise screen space; preference is saved between sessions
 - **Theme picker** — choose **Light**, **Dark**, or **System** (follows your OS preference); fully dark-mode throughout
 - **System status bar** — the Settings page shows a live green/amber/grey indicator with uptime and version, auto-refreshing every 30 seconds
+
+### Backup & Restore
+- **Export** a ZIP from Settings containing your SQLite database, all settings, and a metadata file — one click, no command line
+- **Restore** by uploading a backup ZIP; AutoRrent atomically swaps the database with zero data loss
+- The scheduler is paused for the duration of the restore and resumes automatically
 
 ### Self-Hosted & Simple
 - Runs in a **single Docker container** — no separate database server, no Redis, no message queue
@@ -146,7 +151,11 @@ Once enabled, AutoRrent automatically pings your media server to trigger a libra
 
 ### Downloads
 
-All downloads added through AutoRrent appear here. Active downloads show a live progress bar, speed, and ETA. The history section tracks everything that's been grabbed. The page refreshes automatically every 10 seconds.
+All downloads added through AutoRrent appear here. Active downloads show a live progress bar, speed, and ETA. The page refreshes automatically every 10 seconds.
+
+### History
+
+Every torrent sent to qBittorrent — whether triggered manually from the Search page or automatically by the watchlist scanner — is recorded here. Filter by name, source, or status; export the full log as CSV; or delete individual entries. A "Clear all" button wipes the history without affecting qBittorrent or your files.
 
 ---
 
@@ -203,7 +212,7 @@ The `APP_VERSION` environment variable sets the `version` field — useful when 
 
 ```yaml
 environment:
-  - APP_VERSION=1.2.0
+  - APP_VERSION=1.3.0
 ```
 
 ---
@@ -256,7 +265,7 @@ autorrent/
 │   │   ├── database.py          # SQLAlchemy + SQLite setup
 │   │   ├── models.py            # Database models
 │   │   ├── schemas.py           # Pydantic request/response schemas
-│   │   ├── routers/             # API route handlers (health, search, watchlist…)
+│   │   ├── routers/             # API route handlers (health, search, watchlist, history, backup…)
 │   │   └── services/
 │   │       ├── qbittorrent.py   # qBittorrent API wrapper
 │   │       ├── scheduler.py     # APScheduler watchlist scanner
@@ -267,7 +276,7 @@ autorrent/
 │   └── requirements.txt
 ├── frontend/
 │   └── src/
-│       ├── pages/               # Search, Watchlist, Downloads, Settings
+│       ├── pages/               # Search, Watchlist, Downloads, History, Settings
 │       ├── components/          # Layout, sidebar
 │       └── api/client.ts        # Typed fetch wrapper
 ├── Dockerfile                   # Multi-stage: Node build → Python runtime
