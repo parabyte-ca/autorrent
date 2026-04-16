@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .database import Base, engine
-from .routers import backup, downloads, health, paths, search, settings, watchlist
+from .routers import backup, downloads, health, history, paths, search, settings, watchlist
 from .services.scheduler import start_scheduler, stop_scheduler
 
 STATIC_DIR = pathlib.Path("/app/static")
@@ -45,6 +45,7 @@ app.add_middleware(
 
 app.include_router(health.router)  # no auth, must be registered first
 app.include_router(backup.router, prefix="/api")
+app.include_router(history.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")
 app.include_router(downloads.router, prefix="/api")

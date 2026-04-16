@@ -48,3 +48,37 @@ class Setting(Base):
 
     key = Column(String, primary_key=True)
     value = Column(String, nullable=True)
+
+
+class DownloadHistory(Base):
+    """Persistent record of every torrent sent to qBittorrent.
+
+    Created immediately after a successful add_torrent() call (source may be
+    "manual" from the Search page or "watchlist" from the auto-scanner).
+    Status is updated in-place as qBittorrent reports progress.
+    """
+    __tablename__ = "download_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Torrent display name
+    name = Column(String, nullable=False)
+    # "manual" | "watchlist"
+    source = Column(String, nullable=False)
+    # Indexer the result came from, e.g. "nyaa", "tpb", "jackett/PublicHD"
+    indexer = Column(String, nullable=True)
+    # Destination folder display name (not the Linux path)
+    folder = Column(String, nullable=True)
+    # qBittorrent info-hash — used to match completion events
+    torrent_hash = Column(String, nullable=True, index=True)
+    # Total torrent size in bytes (may be populated later from qBittorrent)
+    size_bytes = Column(BigInteger, nullable=True)
+    # When the torrent was submitted to qBittorrent
+    added_at = Column(DateTime, nullable=False, server_default=func.now())
+    # Set when qBittorrent reports the torrent is seeding/completed
+    completed_at = Column(DateTime, nullable=True)
+    # "downloading" | "completed" | "failed"
+    status = Column(String, nullable=False, default="downloading")
+    # Populated when source == "watchlist"
+    watchlist_id = Column(Integer, ForeignKey("watchlist.id"), nullable=True)
+    # Populated when status == "failed"
+    error_msg = Column(String, nullable=True)

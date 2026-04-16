@@ -224,7 +224,7 @@ export default function Search() {
   const handleDownload = async (pathId?: number) => {
     if (!dlTarget) return;
     try {
-      await api.downloads.add({ magnet: dlTarget.magnet, title: dlTarget.title, download_path_id: pathId });
+      await api.downloads.add({ magnet: dlTarget.magnet, title: dlTarget.title, download_path_id: pathId, indexer: dlTarget.source });
       showToast("Added to qBittorrent!");
     } catch (e: unknown) {
       showToast(`Error: ${(e as Error).message}`);

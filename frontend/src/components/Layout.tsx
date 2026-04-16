@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
+  Clock,
   Download,
   Monitor,
   Moon,
@@ -17,6 +18,7 @@ const nav = [
   { to: "/search",    label: "Search",    icon: Search   },
   { to: "/watchlist", label: "Watchlist", icon: Tv       },
   { to: "/downloads", label: "Downloads", icon: Download },
+  { to: "/history",   label: "History",   icon: Clock    },
   { to: "/settings",  label: "Settings",  icon: Settings },
 ];
 
@@ -132,7 +134,7 @@ export default function Layout() {
             ))}
           </div>
           {!collapsed && (
-            <p className="text-xs text-gray-400 dark:text-gray-600">AutoRrent v1.2</p>
+            <p className="text-xs text-gray-400 dark:text-gray-600">AutoRrent v1.3</p>
           )}
         </div>
       </aside>

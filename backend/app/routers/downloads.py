@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import threading
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Download, DownloadPath, Setting
+from ..models import Download, DownloadHistory, DownloadPath, Setting
 from ..schemas import DownloadCreate
 from ..services.media_servers import trigger_media_refresh
 from ..services.qbittorrent import add_torrent, get_torrent_status
@@ -17,6 +18,7 @@ router = APIRouter()
 DONE_STATES = {"uploading", "stalledUP", "forcedUP", "checkingUP"}
 SEEDING_STATES = {"uploading", "stalledUP", "forcedUP"}
 DOWNLOADING_STATES = {"downloading", "stalledDL", "forcedDL", "checkingDL", "metaDL"}
+ERROR_STATES = {"error", "missingFiles"}
 
 
 def _fire_media_refresh(settings_dict: dict) -> None:
@@ -28,6 +30,46 @@ def _fire_media_refresh(settings_dict: dict) -> None:
             logger.error("Media refresh thread error: %s", e)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def _update_history_completed(db: Session, torrent_hash: str, size_bytes: int | None) -> None:
+    """Mark the most recent matching history row as completed."""
+    try:
+        hist = (
+            db.query(DownloadHistory)
+            .filter(
+                DownloadHistory.torrent_hash == torrent_hash,
+                DownloadHistory.status == "downloading",
+            )
+            .order_by(DownloadHistory.added_at.desc())
+            .first()
+        )
+        if hist:
+            hist.status = "completed"
+            hist.completed_at = datetime.utcnow()
+            if hist.size_bytes is None and size_bytes:
+                hist.size_bytes = size_bytes
+    except Exception as e:
+        logger.error("Failed to update history on completion: %s", e)
+
+
+def _update_history_failed(db: Session, torrent_hash: str, error_msg: str) -> None:
+    """Mark the most recent matching history row as failed."""
+    try:
+        hist = (
+            db.query(DownloadHistory)
+            .filter(
+                DownloadHistory.torrent_hash == torrent_hash,
+                DownloadHistory.status == "downloading",
+            )
+            .order_by(DownloadHistory.added_at.desc())
+            .first()
+        )
+        if hist:
+            hist.status = "failed"
+            hist.error_msg = error_msg
+    except Exception as e:
+        logger.error("Failed to update history on failure: %s", e)
 
 
 @router.get("/downloads")
@@ -65,11 +107,17 @@ def get_downloads(db: Session = Depends(get_db)):
                         d.status = "seeding"
                         item["status"] = "seeding"
                         if prev_status != "seeding":
+                            _update_history_completed(db, d.torrent_hash, d.size_bytes)
                             settings_dict = {s.key: s.value for s in db.query(Setting).all()}
                             _fire_media_refresh(settings_dict)
                     elif qstate in DOWNLOADING_STATES:
                         d.status = "downloading"
                         item["status"] = "downloading"
+                    elif qstate in ERROR_STATES:
+                        d.status = "error"
+                        item["status"] = "error"
+                        if prev_status != "error":
+                            _update_history_failed(db, d.torrent_hash, qstate)
                     db.commit()
             except Exception:
                 pass
@@ -81,6 +129,7 @@ def get_downloads(db: Session = Depends(get_db)):
 
 @router.post("/downloads", status_code=201)
 def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
+    dp = None
     save_path = "/downloads"
 
     if payload.download_path_id:
@@ -111,6 +160,24 @@ def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
     db.add(download)
     db.commit()
     db.refresh(download)
+
+    # Write history record immediately after the torrent is accepted by
+    # qBittorrent.  Failures here must never block or fail the download itself.
+    try:
+        hist = DownloadHistory(
+            name=payload.title,
+            source="manual",
+            indexer=payload.indexer,
+            folder=dp.name if dp else None,
+            torrent_hash=info_hash,
+            size_bytes=None,  # not known at add time; filled in on completion
+            status="downloading",
+            watchlist_id=payload.watchlist_id,
+        )
+        db.add(hist)
+        db.commit()
+    except Exception as e:
+        logger.error("Failed to write download history: %s", e)
 
     return {
         "id": download.id,
