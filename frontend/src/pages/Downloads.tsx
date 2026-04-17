@@ -26,30 +26,47 @@ function fmtDate(s: string) {
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {
     downloading: {
-      cls: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400",
+      cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400",
       icon: <Loader2 className="h-3 w-3 animate-spin" />, label: "Downloading",
     },
+    completed: {
+      cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
+      icon: <CheckCircle2 className="h-3 w-3" />, label: "Completed",
+    },
+    // Legacy statuses kept for backward compatibility with pre-v2.1 records
     seeding: {
       cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
-      icon: <CheckCircle2 className="h-3 w-3" />, label: "Seeding",
+      icon: <CheckCircle2 className="h-3 w-3" />, label: "Completed",
     },
     done: {
-      cls: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400",
-      icon: <CheckCircle2 className="h-3 w-3" />, label: "Done",
+      cls: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400",
+      icon: <CheckCircle2 className="h-3 w-3" />, label: "Completed",
     },
     adding: {
       cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-400",
       icon: <Clock className="h-3 w-3" />, label: "Adding",
     },
+    failed: {
+      cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
+      icon: <XCircle className="h-3 w-3" />, label: "Failed",
+    },
     error: {
       cls: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400",
-      icon: <XCircle className="h-3 w-3" />, label: "Error",
+      icon: <XCircle className="h-3 w-3" />, label: "Failed",
     },
   };
-  const s = map[status] ?? map.adding;
+  const s = map[status];
+  if (s) {
+    return (
+      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>
+        {s.icon}{s.label}
+      </span>
+    );
+  }
+  // Unrecognised state — show raw string in grey
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${s.cls}`}>
-      {s.icon}{s.label}
+    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+      <Clock className="h-3 w-3" />{status}
     </span>
   );
 }
@@ -120,8 +137,9 @@ export default function Downloads() {
     showToast("Removed from history.");
   };
 
-  const active   = downloads.filter((d) => d.status === "downloading" || d.status === "adding");
-  const finished = downloads.filter((d) => d.status !== "downloading" && d.status !== "adding");
+  const _inProgress = new Set(["downloading", "adding"]);
+  const active   = downloads.filter((d) => _inProgress.has(d.status));
+  const finished = downloads.filter((d) => !_inProgress.has(d.status));
 
   if (loading) return (
     <div className="flex h-full items-center justify-center">

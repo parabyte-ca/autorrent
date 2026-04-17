@@ -83,6 +83,21 @@ def scan_watchlist() -> None:
                 if existing:
                     continue
 
+                # Duplicate check — skip silently if already downloaded.
+                from .duplicate import check_duplicate
+                from .qbittorrent import _hash_from_magnet as _h
+                dup = check_duplicate(
+                    torrent_hash=_h(best["magnet"]),
+                    torrent_name=best["title"],
+                    db=db,
+                )
+                if dup["is_duplicate"]:
+                    logger.info(
+                        "Skipping duplicate watchlist download: '%s' matched existing entry '%s' (%s).",
+                        best["title"], dup["matched_name"], dup["match_type"],
+                    )
+                    continue
+
                 # Resolve save path
                 save_path = "/downloads"
                 if item.download_path_id:
@@ -234,7 +249,12 @@ def check_show_statuses(item_id: int | None = None) -> None:
 
 
 def _cleanup_completed() -> None:
-    """Remove completed (seeding) torrents from qBittorrent if the setting is enabled."""
+    """Remove completed torrents from qBittorrent when remove_on_complete is enabled.
+
+    Updated in v2.1 to query 'completed' status (replacing old 'seeding') and
+    to set qbit_removed=True instead of status='done', keeping status consistent
+    with the polling-loop auto-cleanup in the downloads router.
+    """
     from ..database import SessionLocal
     from ..models import Download, Setting
     from .qbittorrent import remove_torrent
@@ -245,13 +265,21 @@ def _cleanup_completed() -> None:
         if settings.get("remove_on_complete", "false").lower() != "true":
             return
 
-        seeding = db.query(Download).filter(Download.status == "seeding").all()
-        for dl in seeding:
+        # Include legacy "seeding" rows created before v2.1.
+        candidates = (
+            db.query(Download)
+            .filter(
+                Download.status.in_(["seeding", "completed"]),
+                Download.qbit_removed == False,
+            )
+            .all()
+        )
+        for dl in candidates:
             if not dl.torrent_hash:
                 continue
             try:
                 remove_torrent(dl.torrent_hash, delete_files=False)
-                dl.status = "done"
+                dl.qbit_removed = True
                 logger.info("Removed completed torrent from qBittorrent: %s", dl.title)
             except Exception as e:
                 logger.warning("Could not remove torrent %s: %s", dl.torrent_hash, e)

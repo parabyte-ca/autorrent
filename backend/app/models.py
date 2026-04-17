@@ -77,6 +77,11 @@ class Download(Base):
     download_path = Column(String, nullable=True)
     watchlist_id = Column(Integer, ForeignKey("watchlist.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+    # Timestamp of first poll where qBittorrent reported a complete state.
+    # Used to enforce the 60-second grace period before auto-removal.
+    completion_first_seen_at = Column(DateTime, nullable=True)
+    # True once the torrent has been successfully deleted from qBittorrent.
+    qbit_removed = Column(Boolean, default=False, server_default="0")
 
 
 class DownloadPath(Base):
