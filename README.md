@@ -2,6 +2,8 @@
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
+**v2.1** — Completion status accuracy and qBittorrent auto-cleanup: AutoRrent now recognises all seven qBittorrent completion states (`uploading`, `stalledUP`, `checkingUP`, `forcedUP`, `pausedUP`, `completed`, `moving`) so downloads no longer get stuck at "Downloading" after finishing. Once a torrent has been in a complete state for 60 seconds, AutoRrent automatically triggers your Plex/Jellyfin library refresh then removes the torrent entry from qBittorrent (files are always kept). Removal failures are retried on the next poll cycle. Duplicate detection added: manual downloads return a warning if the same torrent has been downloaded before; the watchlist scanner skips duplicates silently.
+
 **v2.0** — Show-ended detection via TVMaze: AutoRrent now checks every active watchlist item against the TVMaze API on a weekly schedule, automatically pauses items when a show has ended, and notifies you via Apprise. Shows that are still running are left untouched. Status badges appear on each watchlist card, and you can override the auto-pause or trigger an immediate status check from the UI.
 
 **v1.3** — Global download history log with search, filtering, CSV export, and per-entry deletion. Backup and restore the full database from Settings. Plex and Jellyfin library refresh on download completion, Docker healthcheck, and a live system status indicator.
@@ -215,7 +217,7 @@ The `APP_VERSION` environment variable sets the `version` field — useful when 
 
 ```yaml
 environment:
-  - APP_VERSION=2.0.0
+  - APP_VERSION=2.1.0
 ```
 
 ---
