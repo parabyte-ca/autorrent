@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 from typing import Optional
 from datetime import datetime
 
@@ -76,8 +76,36 @@ class WatchlistOut(BaseModel):
     last_checked: Optional[datetime] = None
     last_found: Optional[datetime] = None
     created_at: datetime
+    show_status: Optional[str] = None
+    show_status_checked_at: Optional[datetime] = None
+    tvmaze_id: Optional[int] = None
+    show_status_override: bool = False
 
     model_config = {"from_attributes": True}
+
+
+# ── Watchlist episode tracking ────────────────────────────────────────────────
+
+class WatchlistEpisodeOut(BaseModel):
+    id: int
+    watchlist_id: int
+    season: int
+    episode: int
+    downloaded_at: datetime
+    torrent_hash: Optional[str] = None
+    torrent_name: Optional[str] = None
+
+    @field_serializer("downloaded_at")
+    def serialize_downloaded_at(self, v: datetime) -> str:
+        return v.isoformat() + "Z"
+
+    model_config = {"from_attributes": True}
+
+
+class MarkEpisodeRequest(BaseModel):
+    season: int
+    episode: int
+    torrent_name: Optional[str] = None
 
 
 # ── Downloads ─────────────────────────────────────────────────────────────────

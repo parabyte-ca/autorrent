@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger, UniqueConstraint
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from .database import Base
 
 
@@ -18,6 +19,50 @@ class WatchlistItem(Base):
     last_checked = Column(DateTime, nullable=True)
     last_found = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
+
+    show_status = Column(String, nullable=True)
+    show_status_checked_at = Column(DateTime, nullable=True)
+    tvmaze_id = Column(Integer, nullable=True)
+    show_status_override = Column(Boolean, default=False, server_default="0")
+
+    episodes = relationship(
+        "WatchlistEpisode",
+        back_populates="watchlist_item",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class WatchlistEpisode(Base):
+    """Persistent record of every episode successfully sent to qBittorrent via the watchlist.
+
+    The UniqueConstraint on (watchlist_id, season, episode) is the authoritative
+    deduplication guard — the scheduler catches IntegrityError and continues.
+    ondelete="CASCADE" ensures rows are removed when the parent watchlist item
+    is deleted, without requiring application-level cleanup.
+    """
+    __tablename__ = "watchlist_episodes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    watchlist_id = Column(
+        Integer,
+        ForeignKey("watchlist.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    season = Column(Integer, nullable=False)
+    episode = Column(Integer, nullable=False)
+    downloaded_at = Column(DateTime, nullable=False, server_default=func.now())
+    torrent_hash = Column(String, nullable=True)
+    torrent_name = Column(String, nullable=True)
+
+    watchlist_item = relationship("WatchlistItem", back_populates="episodes")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "watchlist_id", "season", "episode",
+            name="uq_watchlist_season_episode",
+        ),
+    )
 
 
 class Download(Base):

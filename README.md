@@ -2,6 +2,8 @@
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
+**v2.0** — Show-ended detection via TVMaze: AutoRrent now checks every active watchlist item against the TVMaze API on a weekly schedule, automatically pauses items when a show has ended, and notifies you via Apprise. Shows that are still running are left untouched. Status badges appear on each watchlist card, and you can override the auto-pause or trigger an immediate status check from the UI.
+
 **v1.3** — Global download history log with search, filtering, CSV export, and per-entry deletion. Backup and restore the full database from Settings. Plex and Jellyfin library refresh on download completion, Docker healthcheck, and a live system status indicator.
 
 AuTorrent connects to your existing [qBittorrent](https://www.qbittorrent.org/) instance and gives it a friendlier face. Search across multiple torrent indexers, send downloads straight to qBittorrent with a folder picker, and set up a watchlist that tracks TV shows and automatically grabs new episodes the moment they appear — no manual checking required.
@@ -25,6 +27,7 @@ Everything is configured through the UI. No config files, no command line, no YA
 - Choose which NAS folder each show downloads to
 - Enable or disable tracking per show without deleting it
 - **Scan Now** button for an immediate check on any item, or scan all at once
+- **Show-ended detection** — every Sunday at 03:00 UTC AutoRrent checks each active item against the [TVMaze](https://www.tvmaze.com/) public API. If a show has ended, the item is auto-paused and you receive an Apprise notification. A coloured status badge (Running / Ended / TBD / In Dev / Unknown) appears on every card, along with how long ago the status was last checked. Hit the magnifying-glass button on any card for an immediate check; use "Resume anyway" to re-enable a paused show and set an override so the auto-pause won't fire again
 
 ### Downloads
 - Live status pulled from qBittorrent — progress bars, download speed, and estimated time remaining
@@ -212,7 +215,7 @@ The `APP_VERSION` environment variable sets the `version` field — useful when 
 
 ```yaml
 environment:
-  - APP_VERSION=1.3.0
+  - APP_VERSION=2.0.0
 ```
 
 ---
@@ -268,7 +271,8 @@ AuTorrent/
 │   │   ├── routers/             # API route handlers (health, search, watchlist, history, backup…)
 │   │   └── services/
 │   │       ├── qbittorrent.py   # qBittorrent API wrapper
-│   │       ├── scheduler.py     # APScheduler watchlist scanner
+│   │       ├── scheduler.py     # APScheduler: watchlist scan + show-status check
+│   │       ├── tvmaze.py        # TVMaze API client (show-ended detection)
 │   │       ├── media_servers.py # Plex + Jellyfin library refresh
 │   │       ├── apprise_notify.py
 │   │       └── indexers/        # NYAA, TPB, Jackett search + adult filter

@@ -23,11 +23,18 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # Migrate: add codec column if it doesn't exist yet (safe no-op if already present)
     with engine.connect() as conn:
-        try:
-            conn.execute(text("ALTER TABLE watchlist ADD COLUMN codec TEXT DEFAULT 'x265'"))
-            conn.commit()
-        except Exception:
-            pass
+        for stmt in [
+            "ALTER TABLE watchlist ADD COLUMN codec TEXT DEFAULT 'x265'",
+            "ALTER TABLE watchlist ADD COLUMN show_status TEXT",
+            "ALTER TABLE watchlist ADD COLUMN show_status_checked_at DATETIME",
+            "ALTER TABLE watchlist ADD COLUMN tvmaze_id INTEGER",
+            "ALTER TABLE watchlist ADD COLUMN show_status_override INTEGER DEFAULT 0",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass
     start_scheduler()
     yield
     stop_scheduler()
