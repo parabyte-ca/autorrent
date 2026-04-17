@@ -149,6 +149,13 @@ export interface MarkEpisodeRequest {
   torrent_name?: string;
 }
 
+export interface DuplicateCheckResult {
+  is_duplicate: boolean;
+  match_type: "hash" | "name" | "active" | null;
+  matched_name: string | null;
+  matched_at: string | null;
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -190,9 +197,11 @@ export const api = {
 
   downloads: {
     list: () => req<Download[]>("/downloads"),
-    add: (data: { magnet: string; title: string; download_path_id?: number; indexer?: string }) =>
+    add: (data: { magnet: string; title: string; download_path_id?: number; indexer?: string; force?: boolean }) =>
       req("/downloads", { method: "POST", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/downloads/${id}`, { method: "DELETE" }),
+    checkDuplicate: (data: { torrent_hash: string | null; torrent_name: string }) =>
+      req<DuplicateCheckResult>("/downloads/check-duplicate", { method: "POST", body: JSON.stringify(data) }),
   },
 
   history: {

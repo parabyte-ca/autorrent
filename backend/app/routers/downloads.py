@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Download, DownloadHistory, DownloadPath, Setting
-from ..schemas import DownloadCreate
+from ..schemas import DownloadCreate, DuplicateCheckRequest
+from ..services.duplicate import check_duplicate
 from ..services.media_servers import trigger_media_refresh
-from ..services.qbittorrent import add_torrent, get_torrent_status
+from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_torrent_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -127,6 +128,19 @@ def get_downloads(db: Session = Depends(get_db)):
     return result
 
 
+@router.post("/downloads/check-duplicate")
+def check_duplicate_endpoint(payload: DuplicateCheckRequest, db: Session = Depends(get_db)):
+    """Check whether a torrent appears to have been downloaded before.
+
+    Always returns HTTP 200 — callers interpret the ``is_duplicate`` field.
+    """
+    return check_duplicate(
+        torrent_hash=payload.torrent_hash,
+        torrent_name=payload.torrent_name,
+        db=db,
+    )
+
+
 @router.post("/downloads", status_code=201)
 def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
     dp = None
@@ -143,6 +157,27 @@ def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
 
     settings = {s.key: s.value for s in db.query(Setting).all()}
     category = settings.get("qbit_category", "autorrent")
+
+    # Duplicate detection — derive hash from the magnet link.
+    torrent_hash = _hash_from_magnet(payload.magnet)
+    dup = check_duplicate(torrent_hash=torrent_hash, torrent_name=payload.title, db=db)
+
+    if dup["is_duplicate"] and not payload.force:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "duplicate": True,
+                "match_type": dup["match_type"],
+                "matched_name": dup["matched_name"],
+                "matched_at": dup["matched_at"],
+                "message": "This torrent appears to have already been downloaded.",
+            },
+        )
+    if dup["is_duplicate"] and payload.force:
+        logger.info(
+            "Duplicate override: adding '%s' despite existing match (%s).",
+            payload.title, dup["match_type"],
+        )
 
     try:
         info_hash = add_torrent(payload.magnet, save_path, category)

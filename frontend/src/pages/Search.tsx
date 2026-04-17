@@ -9,7 +9,7 @@ import {
   Shield,
   Users,
 } from "lucide-react";
-import { api, type DownloadPath, type TorrentResult, type WatchlistCreate } from "../api/client";
+import { api, type DownloadPath, type DuplicateCheckResult, type TorrentResult, type WatchlistCreate } from "../api/client";
 
 const QUALITIES = ["Any", "4K", "1080p", "720p", "480p"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
@@ -87,6 +87,47 @@ function DownloadModal({
           </button>
           <button onClick={() => onConfirm(pathId)} disabled={paths.length === 0} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
             Download
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Duplicate warning modal ───────────────────────────────────────────────────
+
+const MATCH_TYPE_LABEL: Record<string, string> = {
+  hash:   "Exact match by torrent hash.",
+  name:   "Match by torrent name.",
+  active: "Currently active in qBittorrent.",
+};
+
+function DuplicateWarningModal({ result, dup, onClose, onForce }: {
+  result: TorrentResult;
+  dup: DuplicateCheckResult;
+  onClose: () => void;
+  onForce: () => void;
+}) {
+  const matchedAt = dup.matched_at
+    ? ` on ${new Date(dup.matched_at).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`
+    : "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 p-6 shadow-xl border border-gray-200 dark:border-gray-700">
+        <h2 className="mb-1 text-lg font-semibold text-gray-900 dark:text-gray-100">Possible duplicate</h2>
+        <p className="mb-2 text-sm text-gray-700 dark:text-gray-300">
+          <strong>{dup.matched_name ?? result.title}</strong> was already downloaded{matchedAt}. Download again anyway?
+        </p>
+        <p className="mb-4 text-xs text-gray-400 dark:text-gray-500">
+          {dup.match_type ? MATCH_TYPE_LABEL[dup.match_type] : ""}
+        </p>
+        <div className="flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+            Cancel
+          </button>
+          <button onClick={onForce} className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+            Download anyway
           </button>
         </div>
       </div>
@@ -197,6 +238,9 @@ export default function Search() {
   const [error,       setError]       = useState<string | null>(null);
   const [paths,       setPaths]       = useState<DownloadPath[]>([]);
   const [dlTarget,    setDlTarget]    = useState<TorrentResult | null>(null);
+  const [dlForce,     setDlForce]     = useState(false);
+  const [checkingDl,  setCheckingDl]  = useState<TorrentResult | null>(null);
+  const [dupWarning,  setDupWarning]  = useState<{ result: TorrentResult; dup: DuplicateCheckResult } | null>(null);
   const [wlTarget,    setWlTarget]    = useState<TorrentResult | null>(null);
   const [toast,       setToast]       = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -221,15 +265,35 @@ export default function Search() {
     }
   };
 
+  const handleClickDownload = async (r: TorrentResult) => {
+    setCheckingDl(r);
+    try {
+      const dup = await api.downloads.checkDuplicate({ torrent_hash: r.info_hash ?? null, torrent_name: r.title });
+      if (dup.is_duplicate) {
+        setDupWarning({ result: r, dup });
+      } else {
+        setDlForce(false);
+        setDlTarget(r);
+      }
+    } catch {
+      // Check failed — proceed as if no duplicate found
+      setDlForce(false);
+      setDlTarget(r);
+    } finally {
+      setCheckingDl(null);
+    }
+  };
+
   const handleDownload = async (pathId?: number) => {
     if (!dlTarget) return;
     try {
-      await api.downloads.add({ magnet: dlTarget.magnet, title: dlTarget.title, download_path_id: pathId, indexer: dlTarget.source });
+      await api.downloads.add({ magnet: dlTarget.magnet, title: dlTarget.title, download_path_id: pathId, indexer: dlTarget.source, force: dlForce });
       showToast("Added to qBittorrent!");
     } catch (e: unknown) {
       showToast(`Error: ${(e as Error).message}`);
     }
     setDlTarget(null);
+    setDlForce(false);
   };
 
   const handleWatchlist = async (data: WatchlistCreate) => {
@@ -356,9 +420,12 @@ export default function Search() {
                     <Plus className="h-3.5 w-3.5" />
                     Watchlist
                   </button>
-                  <button onClick={() => setDlTarget(r)}
-                    className="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">
-                    <Download className="h-3.5 w-3.5" />
+                  <button
+                    onClick={() => handleClickDownload(r)}
+                    disabled={checkingDl !== null}
+                    className="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {checkingDl === r ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
                     Download
                   </button>
                 </div>
@@ -383,6 +450,18 @@ export default function Search() {
 
       {dlTarget && (
         <DownloadModal result={dlTarget} paths={paths} onClose={() => setDlTarget(null)} onConfirm={handleDownload} />
+      )}
+      {dupWarning && (
+        <DuplicateWarningModal
+          result={dupWarning.result}
+          dup={dupWarning.dup}
+          onClose={() => setDupWarning(null)}
+          onForce={() => {
+            setDlForce(true);
+            setDlTarget(dupWarning.result);
+            setDupWarning(null);
+          }}
+        />
       )}
       {wlTarget && (
         <WatchlistModal result={wlTarget} paths={paths} defaultCodec={codec} onClose={() => setWlTarget(null)} onConfirm={handleWatchlist} />

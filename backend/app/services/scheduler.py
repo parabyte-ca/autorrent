@@ -83,6 +83,21 @@ def scan_watchlist() -> None:
                 if existing:
                     continue
 
+                # Duplicate check — skip silently if already downloaded.
+                from .duplicate import check_duplicate
+                from .qbittorrent import _hash_from_magnet as _h
+                dup = check_duplicate(
+                    torrent_hash=_h(best["magnet"]),
+                    torrent_name=best["title"],
+                    db=db,
+                )
+                if dup["is_duplicate"]:
+                    logger.info(
+                        "Skipping duplicate watchlist download: '%s' matched existing entry '%s' (%s).",
+                        best["title"], dup["matched_name"], dup["match_type"],
+                    )
+                    continue
+
                 # Resolve save path
                 save_path = "/downloads"
                 if item.download_path_id:
