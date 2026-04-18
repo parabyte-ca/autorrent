@@ -1,13 +1,18 @@
 services:
   autorrent:
-    build: .
+    image: ghcr.io/parabyte-ca/autorrent:latest
+    # build: .        # uncomment to build locally instead of pulling from registry
+    container_name: autorrent
     ports:
       - "8180:8000"
     volumes:
       # Persists the SQLite database across container restarts
       - ./data:/app/data
+      # Optional: give the container access to NAS paths
+      # - /mnt/nas:/mnt/nas
     environment:
       - DATABASE_URL=sqlite:////app/data/autorrent.db
+      - TZ=America/Toronto
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -15,6 +20,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    # Optional: give the container access to NAS paths
-    # volumes:
-    #   - /mnt/nas:/mnt/nas

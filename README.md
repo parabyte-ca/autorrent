@@ -2,6 +2,8 @@
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
+**v2.2** — GitHub Actions CI/CD pipeline: every push to `main` now automatically builds and publishes a Docker image to GitHub Container Registry (`ghcr.io/parabyte-ca/autorrent:latest`). Updating a running instance is now a single command: `./update.sh`. Version tags like `v1.2.3` produce versioned image tags automatically. Build caching keeps repeat builds fast.
+
 **v2.1** — Completion status accuracy and qBittorrent auto-cleanup: AutoRrent now recognises all seven qBittorrent completion states (`uploading`, `stalledUP`, `checkingUP`, `forcedUP`, `pausedUP`, `completed`, `moving`) so downloads no longer get stuck at "Downloading" after finishing. Once a torrent has been in a complete state for 60 seconds, AutoRrent automatically triggers your Plex/Jellyfin library refresh then removes the torrent entry from qBittorrent (files are always kept). Removal failures are retried on the next poll cycle. Duplicate detection added: manual downloads return a warning if the same torrent has been downloaded before; the watchlist scanner skips duplicates silently.
 
 **v2.0** — Show-ended detection via TVMaze: AutoRrent now checks every active watchlist item against the TVMaze API on a weekly schedule, automatically pauses items when a show has ended, and notifies you via Apprise. Shows that are still running are left untouched. Status badges appear on each watchlist card, and you can override the auto-pause or trigger an immediate status check from the UI.
@@ -80,9 +82,35 @@ cd autorrent
 docker compose up -d
 ```
 
+`docker compose up -d` pulls the pre-built image from GitHub Container Registry and starts the container. No local build step required.
+
 Open **http://your-server-ip:8180** in your browser.
 
 > Port `8180` is used by default. If you need a different port, change the left-hand side of `"8180:8000"` in `docker-compose.yml`.
+
+---
+
+## Updating AutoRrent
+
+AutoRrent is automatically built and published to GitHub Container Registry on every push to `main`.
+
+To update your running instance:
+
+```bash
+cd /path/to/autorrent
+./update.sh
+```
+
+Or manually:
+
+```bash
+docker pull ghcr.io/parabyte-ca/autorrent:latest
+docker compose up -d
+```
+
+Your data is stored in `./data/` and is not affected by updates.
+
+> **First-time setup:** After the first successful GitHub Actions build, the package visibility must be set to **Public** so the image can be pulled without authentication. Go to `https://github.com/parabyte-ca?tab=packages`, find the `autorrent` package, and set its visibility to Public.
 
 ---
 
@@ -217,7 +245,7 @@ The `APP_VERSION` environment variable sets the `version` field — useful when 
 
 ```yaml
 environment:
-  - APP_VERSION=2.1.0
+  - APP_VERSION=2.2.0
 ```
 
 ---
