@@ -27,5 +27,5 @@ def get_health(db: Session = Depends(get_db)):
         "status": "ok" if db_ok else "degraded",
         "db_ok": db_ok,
         "uptime_seconds": int(time.time() - _START_TIME),
-        "version": os.environ.get("APP_VERSION", "2.2.0"),
+        "version": os.environ.get("APP_VERSION", "2.3.0"),
     }

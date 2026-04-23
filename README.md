@@ -2,6 +2,8 @@
 
 A self-hosted torrent auto-downloader with a clean web interface! Search for torrents, send them straight to qBittorrent, and set up a watchlist that automatically downloads new TV episodes as they appear.
 
+**v2.3** — Four new torrent sources: EZTV (TV-focused), YTS (movies), TorrentGalaxy, and 1337x are now searched automatically as part of "all" — no configuration required. Watchlist auto-download notifications now include a ⬇️ indicator. A "Clear finished" button on the Downloads tab bulk-removes all completed and errored entries in one click.
+
 **v2.2** — GitHub Actions CI/CD pipeline: every push to `main` now automatically builds and publishes a Docker image to GitHub Container Registry (`ghcr.io/parabyte-ca/autorrent:latest`). Updating a running instance is now a single command: `./update.sh`. Version tags like `v1.2.3` produce versioned image tags automatically. Build caching keeps repeat builds fast.
 
 **v2.1** — Completion status accuracy and qBittorrent auto-cleanup: AutoRrent now recognises all seven qBittorrent completion states (`uploading`, `stalledUP`, `checkingUP`, `forcedUP`, `pausedUP`, `completed`, `moving`) so downloads no longer get stuck at "Downloading" after finishing. Once a torrent has been in a complete state for 60 seconds, AutoRrent automatically triggers your Plex/Jellyfin library refresh then removes the torrent entry from qBittorrent (files are always kept). Removal failures are retried on the next poll cycle. Duplicate detection added: manual downloads return a warning if the same torrent has been downloaded before; the watchlist scanner skips duplicates silently.
@@ -245,7 +247,7 @@ The `APP_VERSION` environment variable sets the `version` field — useful when 
 
 ```yaml
 environment:
-  - APP_VERSION=2.2.0
+  - APP_VERSION=2.3.0
 ```
 
 ---
@@ -305,7 +307,7 @@ autorrent/
 │   │       ├── tvmaze.py        # TVMaze API client (show-ended detection)
 │   │       ├── media_servers.py # Plex + Jellyfin library refresh
 │   │       ├── apprise_notify.py
-│   │       └── indexers/        # NYAA, TPB, Jackett search + adult filter
+│   │       └── indexers/        # NYAA, TPB, EZTV, YTS, TGX, 1337x, Jackett + adult filter
 │   ├── tests/                   # pytest unit tests
 │   └── requirements.txt
 ├── frontend/

@@ -20,7 +20,7 @@ class TestGetHealth:
         assert result["db_ok"] is True
         assert isinstance(result["uptime_seconds"], int)
         assert result["uptime_seconds"] >= 0
-        assert result["version"] == "dev"
+        assert result["version"] == "2.3.0"
 
     def test_degraded_when_db_raises(self):
         db = _mock_db()
@@ -41,7 +41,7 @@ class TestGetHealth:
         env = {k: v for k, v in os.environ.items() if k != "APP_VERSION"}
         with patch.dict("os.environ", env, clear=True):
             result = get_health(db=_mock_db())
-        assert result["version"] == "dev"
+        assert result["version"] == "2.3.0"
 
     def test_uptime_is_non_negative_integer(self):
         result = get_health(db=_mock_db())

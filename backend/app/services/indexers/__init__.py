@@ -1,8 +1,12 @@
 import logging
 
+from .eztv import search_eztv
 from .jackett import search_jackett
+from .leet337x import search_1337x
 from .nyaa import search_nyaa
 from .tpb import search_tpb
+from .torrentgalaxy import search_torrentgalaxy
+from .yts import search_yts
 from ...database import SessionLocal
 from ...models import Setting
 
@@ -98,6 +102,30 @@ def search_all(
             results.extend(search_tpb(search_query))
         except Exception as e:
             logger.warning("TPB search failed: %s", e)
+
+    if indexer in ("eztv", "all"):
+        try:
+            results.extend(search_eztv(search_query))
+        except Exception as e:
+            logger.warning("EZTV search failed: %s", e)
+
+    if indexer in ("yts", "all"):
+        try:
+            results.extend(search_yts(search_query))
+        except Exception as e:
+            logger.warning("YTS search failed: %s", e)
+
+    if indexer in ("tgx", "all"):
+        try:
+            results.extend(search_torrentgalaxy(search_query))
+        except Exception as e:
+            logger.warning("TorrentGalaxy search failed: %s", e)
+
+    if indexer in ("1337x", "all"):
+        try:
+            results.extend(search_1337x(search_query))
+        except Exception as e:
+            logger.warning("1337x search failed: %s", e)
 
     jackett_url = settings.get("jackett_url", "").strip()
     jackett_key = settings.get("jackett_api_key", "").strip()

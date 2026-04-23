@@ -8,7 +8,7 @@ router = APIRouter()
 @router.get("/search")
 async def search(
     q: str = Query(..., min_length=1, description="Search query"),
-    indexer: str = Query("all", description="Indexer: nyaa, tpb, jackett, or all"),
+    indexer: str = Query("all", description="Indexer: nyaa, tpb, jackett, eztv, yts, tgx, 1337x, or all"),
     quality: str = Query(None, description="Filter by quality: 4K, 1080p, 720p, 480p"),
     codec: str = Query("x265", description="Codec: x265, x264, AV1, or Any"),
     filter_adult: bool = Query(True, description="Filter out adult/pornographic content"),
