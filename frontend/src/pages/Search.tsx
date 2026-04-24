@@ -14,15 +14,23 @@ import { api, type DownloadPath, type DuplicateCheckResult, type TorrentResult, 
 const QUALITIES = ["Any", "4K", "1080p", "720p", "480p"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
 const INDEXERS  = [
-  { value: "all",     label: "All sources"    },
-  { value: "nyaa",    label: "NYAA"           },
-  { value: "tpb",     label: "The Pirate Bay" },
-  { value: "jackett", label: "Jackett"        },
+  { value: "all",     label: "All sources"      },
+  { value: "nyaa",    label: "NYAA"             },
+  { value: "tpb",     label: "The Pirate Bay"   },
+  { value: "eztv",    label: "EZTV"             },
+  { value: "yts",     label: "YTS"              },
+  { value: "tgx",     label: "TorrentGalaxy"    },
+  { value: "1337x",   label: "1337x"            },
+  { value: "jackett", label: "Jackett"          },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
   nyaa:    "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-400",
   tpb:     "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400",
+  eztv:    "bg-blue-100   text-blue-700   dark:bg-blue-900/40   dark:text-blue-400",
+  yts:     "bg-teal-100   text-teal-700   dark:bg-teal-900/40   dark:text-teal-400",
+  tgx:     "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400",
+  "1337x": "bg-red-100    text-red-700    dark:bg-red-900/40    dark:text-red-400",
   jackett: "bg-green-100  text-green-700  dark:bg-green-900/40  dark:text-green-400",
 };
 const QUALITY_COLORS: Record<string, string> = {
