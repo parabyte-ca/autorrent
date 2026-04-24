@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -68,6 +69,20 @@ def scan_watchlist() -> None:
                 # regardless of the search query, so we must verify the match.
                 ep_tag = f"S{item.season:02d}E{item.episode:02d}"
                 results = [r for r in results if ep_tag.lower() in r["title"].lower()]
+
+                # Episode-tag alone is not enough: two different shows can share
+                # the same SxxExx number. Also require at least one significant
+                # word from the show's search query to appear in the result title.
+                _STOP = {"the", "a", "an", "of", "and", "in", "is", "to", "at", "for", "on"}
+                query_words = {
+                    w for w in re.sub(r"[^a-z0-9]", " ", item.search_query.lower()).split()
+                    if len(w) > 1 and w not in _STOP
+                }
+                if query_words:
+                    results = [
+                        r for r in results
+                        if query_words & set(re.sub(r"[^a-z0-9]", " ", r["title"].lower()).split())
+                    ]
 
                 if not results:
                     logger.debug("No results for: %s", query)
