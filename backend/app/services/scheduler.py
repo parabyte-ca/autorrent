@@ -63,6 +63,12 @@ def scan_watchlist() -> None:
                 )
                 results = [r for r in results if r["seeds"] >= min_seeds]
 
+                # Reject results whose titles don't contain the episode tag.
+                # Some indexers (e.g. EZTV) return unfiltered recent torrents
+                # regardless of the search query, so we must verify the match.
+                ep_tag = f"S{item.season:02d}E{item.episode:02d}"
+                results = [r for r in results if ep_tag.lower() in r["title"].lower()]
+
                 if not results:
                     logger.debug("No results for: %s", query)
                     continue
@@ -71,7 +77,6 @@ def scan_watchlist() -> None:
 
                 # Secondary guard: skip if a Download record already tracks this episode
                 # (handles the case where the episode is actively downloading).
-                ep_tag = f"S{item.season:02d}E{item.episode:02d}"
                 existing = (
                     db.query(Download)
                     .filter(
