@@ -6,17 +6,22 @@ from .nyaa import TRACKER_PARAMS
 
 YTS_API = "https://yts.mx/api/v2/list_movies.json"
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
 _YTS_QUALITY_MAP = {
     "2160p": "4K",
     "1080p": "1080p",
-    "720p": "720p",
-    "480p": "480p",
-    "3D": "1080p",
+    "720p":  "720p",
+    "480p":  "480p",
+    "3D":    "1080p",
 }
 
 
 def search_yts(query: str) -> list[dict]:
-    with httpx.Client(timeout=15) as client:
+    with httpx.Client(timeout=15, follow_redirects=True, headers=_HEADERS) as client:
         r = client.get(YTS_API, params={"query_term": query, "limit": 50})
         r.raise_for_status()
         data = r.json()
