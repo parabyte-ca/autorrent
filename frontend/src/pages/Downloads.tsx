@@ -137,6 +137,13 @@ export default function Downloads() {
     showToast("Removed from history.");
   };
 
+  const handleClearFinished = async () => {
+    if (!confirm(`Remove all ${finished.length} finished download(s) from history?`)) return;
+    await api.downloads.clearFinished();
+    load();
+    showToast("Finished downloads cleared.");
+  };
+
   const _inProgress = new Set(["downloading", "adding"]);
   const active   = downloads.filter((d) => _inProgress.has(d.status));
   const finished = downloads.filter((d) => !_inProgress.has(d.status));
@@ -187,9 +194,18 @@ export default function Downloads() {
           )}
           {finished.length > 0 && (
             <section>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                History ({finished.length})
-              </h2>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  History ({finished.length})
+                </h2>
+                <button
+                  onClick={handleClearFinished}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-2.5 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500 hover:border-red-200 dark:hover:border-red-900"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Clear finished
+                </button>
+              </div>
               <SectionList items={finished} />
             </section>
           )}

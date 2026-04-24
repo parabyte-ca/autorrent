@@ -200,6 +200,7 @@ export const api = {
     add: (data: { magnet: string; title: string; download_path_id?: number; indexer?: string; force?: boolean }) =>
       req("/downloads", { method: "POST", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/downloads/${id}`, { method: "DELETE" }),
+    clearFinished: () => req<{ ok: boolean; deleted: number }>("/downloads", { method: "DELETE" }),
     checkDuplicate: (data: { torrent_hash: string | null; torrent_name: string }) =>
       req<DuplicateCheckResult>("/downloads/check-duplicate", { method: "POST", body: JSON.stringify(data) }),
   },

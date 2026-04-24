@@ -3,13 +3,20 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /build/frontend
 
 COPY frontend/package*.json ./
-RUN npm ci
+RUN npm install
 
 COPY frontend/ ./
 RUN npm run build
 
 # ── Stage 2: Python backend + compiled frontend ────────────────────────────────
 FROM python:3.11-slim
+
+LABEL org.opencontainers.image.source="https://github.com/parabyte-ca/autorrent"
+LABEL org.opencontainers.image.description="Self-hosted torrent auto-downloader"
+LABEL org.opencontainers.image.licenses="MIT"
+
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
 

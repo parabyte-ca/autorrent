@@ -172,7 +172,7 @@ def scan_watchlist() -> None:
                 notify(
                     apprise_url,
                     title=f"AutoRrent — {item.title}",
-                    body=f"Downloaded: {best['title']}",
+                    body=f"⬇️ Downloaded: {best['title']}",
                 )
 
             except Exception as e:

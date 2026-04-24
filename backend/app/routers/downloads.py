@@ -299,6 +299,21 @@ def add_download(payload: DownloadCreate, db: Session = Depends(get_db)):
     }
 
 
+@router.delete("/downloads")
+def clear_finished_downloads(db: Session = Depends(get_db)):
+    _IN_PROGRESS = {"downloading", "adding"}
+    to_delete = (
+        db.query(Download)
+        .filter(~Download.status.in_(_IN_PROGRESS))
+        .all()
+    )
+    count = len(to_delete)
+    for d in to_delete:
+        db.delete(d)
+    db.commit()
+    return {"ok": True, "deleted": count}
+
+
 @router.delete("/downloads/{download_id}")
 def delete_download(download_id: int, db: Session = Depends(get_db)):
     download = db.query(Download).filter(Download.id == download_id).first()
