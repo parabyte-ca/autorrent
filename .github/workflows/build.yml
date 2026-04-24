@@ -29,6 +29,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve app version
+        id: appver
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            # Strip leading 'v' so the UI shows "2.3.0" not "v2.3.0"
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            # Fall back to the version embedded in the health endpoint
+            echo "value=$(grep -oP \"(?<=')\d+\.\d+\.\d+(?=')\" backend/app/routers/health.py | head -1)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -50,4 +61,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            APP_VERSION=${{ github.ref_name }}
+            APP_VERSION=${{ steps.appver.outputs.value }}
