@@ -15,7 +15,7 @@ LABEL org.opencontainers.image.source="https://github.com/parabyte-ca/autorrent"
 LABEL org.opencontainers.image.description="Self-hosted torrent auto-downloader"
 LABEL org.opencontainers.image.licenses="MIT"
 
-ARG APP_VERSION=dev
+ARG APP_VERSION=2.3
 ENV APP_VERSION=${APP_VERSION}
 
 WORKDIR /app
