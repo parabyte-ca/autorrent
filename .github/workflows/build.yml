@@ -33,11 +33,15 @@ jobs:
         id: appver
         run: |
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            # Strip leading 'v' so the UI shows "2.3.0" not "v2.3.0"
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           else
-            # Fall back to the version embedded in the health endpoint
-            echo "value=$(grep -oP \"(?<=')\d+\.\d+\.\d+(?=')\" backend/app/routers/health.py | head -1)" >> "$GITHUB_OUTPUT"
+            VER=$(python3 -c "
+import re, sys
+txt = open('backend/app/routers/health.py').read()
+m = re.search(r'(\d+\.\d+\.\d+)', txt)
+print(m.group(1) if m else '2.3.0')
+")
+            echo "value=$VER" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Extract metadata for Docker
