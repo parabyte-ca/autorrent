@@ -1,3 +1,4 @@
+import logging
 import re
 import urllib.parse
 
@@ -5,6 +6,8 @@ import qbittorrentapi
 
 from ..database import SessionLocal
 from ..models import Setting
+
+logger = logging.getLogger(__name__)
 
 
 def _get_settings() -> dict[str, str]:
@@ -17,10 +20,14 @@ def _get_settings() -> dict[str, str]:
 
 def _get_client() -> qbittorrentapi.Client:
     s = _get_settings()
+    host = s.get("qbit_host", "localhost")
+    port = int(s.get("qbit_port", "8080"))
+    username = s.get("qbit_username", "admin")
+    logger.debug("Connecting to qBittorrent at %s:%s as %s", host, port, username)
     client = qbittorrentapi.Client(
-        host=s.get("qbit_host", "localhost"),
-        port=int(s.get("qbit_port", "8080")),
-        username=s.get("qbit_username", "admin"),
+        host=host,
+        port=port,
+        username=username,
         password=s.get("qbit_password", ""),
     )
     client.auth_log_in()
@@ -71,4 +78,6 @@ def test_connection() -> tuple[bool, str]:
         version = client.app_version()
         return True, f"Connected to qBittorrent {version}"
     except Exception as e:
-        return False, str(e)
+        msg = str(e) or type(e).__name__
+        logger.error("qBittorrent connection failed: %s: %s", type(e).__name__, msg)
+        return False, f"{type(e).__name__}: {msg}" if str(e) else type(e).__name__
