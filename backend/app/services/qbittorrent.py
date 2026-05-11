@@ -30,7 +30,14 @@ def _get_client() -> qbittorrentapi.Client:
         username=username,
         password=s.get("qbit_password", ""),
     )
-    client.auth_log_in()
+    try:
+        client.auth_log_in()
+    except qbittorrentapi.LoginFailed:
+        # qBittorrent 5.x returns HTTP 204 (empty body) on successful login.
+        # Older library versions expect "Ok." in the body and raise LoginFailed
+        # even though the session cookie was set correctly. Verify by making a
+        # real API call — if that succeeds the connection is fine.
+        client.app_version()
     return client
 
 
