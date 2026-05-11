@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
   ChevronRight,
   Clock,
   Download,
+  LogOut,
   Monitor,
   Moon,
   Search,
@@ -13,6 +14,7 @@ import {
   Tv,
 } from "lucide-react";
 import { useTheme, type Theme } from "../ThemeContext";
+import { authStore } from "../auth";
 
 const nav = [
   { to: "/search",    label: "Search",    icon: Search   },
@@ -30,6 +32,12 @@ const themeButtons: { value: Theme; icon: typeof Sun; title: string }[] = [
 
 export default function Layout() {
   const { theme, setTheme } = useTheme();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    authStore.clearToken();
+    navigate("/login", { replace: true });
+  };
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     const saved = localStorage.getItem("ar-sidebar");
@@ -132,6 +140,15 @@ export default function Layout() {
                 <Icon className="h-3.5 w-3.5" />
               </button>
             ))}
+            {authStore.getToken() && (
+              <button
+                title="Sign out"
+                onClick={handleLogout}
+                className="rounded-md p-1.5 text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500 transition-colors"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           {!collapsed && (
             <p className="text-xs text-gray-400 dark:text-gray-600">AutoRrent v1.3</p>

@@ -1,15 +1,39 @@
+import { authStore } from "../auth";
+
 const BASE = "/api";
+
+function _authHeader(): Record<string, string> {
+  const token = authStore.getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ..._authHeader(),
+      ...(init?.headers as Record<string, string> ?? {}),
+    },
   });
+  if (res.status === 401) {
+    authStore.clearToken();
+    window.location.href = "/login";
+    throw new Error("Session expired. Please log in.");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Unknown error" }));
     throw new Error(err.detail ?? "Request failed");
   }
   return res.json() as Promise<T>;
+}
+
+// For endpoints that return a raw Response (file downloads, multipart uploads)
+function authedFetch(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { ..._authHeader(), ...(init?.headers as Record<string, string> ?? {}) },
+  });
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -208,7 +232,7 @@ export const api = {
   history: {
     list: (params: string) => req<HistoryResponse>(`/history?${params}`),
     /** Fetch the full history as a CSV file; returns a raw Response. */
-    export: (): Promise<Response> => fetch(`${BASE}/history/export`),
+    export: (): Promise<Response> => authedFetch(`/history/export`),
     deleteOne: (id: number) => req(`/history/${id}`, { method: "DELETE" }),
     clearAll: () => req<{ deleted: number }>("/history?confirm=true", { method: "DELETE" }),
   },
@@ -225,14 +249,24 @@ export const api = {
   backup: {
     /** Fetch the export ZIP; returns the raw Response so the caller can stream
      *  the blob — do not pass through req<T>() which calls .json(). */
-    export: (): Promise<Response> => fetch(`${BASE}/backup/export`),
+    export: (): Promise<Response> => authedFetch(`/backup/export`),
     /** Upload a backup ZIP; returns the raw Response so the caller can inspect
      *  both success JSON and error JSON without an intermediate throw. */
     restore: (file: File): Promise<Response> => {
       const form = new FormData();
       form.append("file", file);
-      return fetch(`${BASE}/backup/restore`, { method: "POST", body: form });
+      return authedFetch(`/backup/restore`, { method: "POST", body: form });
     },
+  },
+
+  auth: {
+    status: () => req<{ auth_required: boolean }>("/auth/status"),
+    login: (password: string) =>
+      req<{ token: string }>("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      }),
+    revoke: () => req<{ ok: boolean }>("/auth/revoke", { method: "POST" }),
   },
 
   settings: {

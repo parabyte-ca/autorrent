@@ -1,5 +1,6 @@
 import os
 import pathlib
+import secrets
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,8 +10,10 @@ from fastapi.staticfiles import StaticFiles
 
 from sqlalchemy import text
 
-from .database import Base, engine
-from .routers import backup, downloads, health, history, paths, search, settings, watchlist
+from .database import Base, SessionLocal, engine
+from .middleware.auth import AuthMiddleware
+from .models import Setting
+from .routers import auth, backup, downloads, health, history, paths, search, settings, watchlist
 from .services.scheduler import start_scheduler, stop_scheduler
 
 STATIC_DIR = pathlib.Path("/app/static")
@@ -37,6 +40,16 @@ async def lifespan(app: FastAPI):
                 conn.commit()
             except Exception:
                 pass
+
+    # Seed session_secret on first run (single-threaded here — no race)
+    db = SessionLocal()
+    try:
+        if not db.query(Setting).filter(Setting.key == "session_secret").first():
+            db.add(Setting(key="session_secret", value=secrets.token_hex(32)))
+            db.commit()
+    finally:
+        db.close()
+
     start_scheduler()
     yield
     stop_scheduler()
@@ -51,8 +64,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# AuthMiddleware is added after CORSMiddleware so CORS pre-flights are exempt
+app.add_middleware(AuthMiddleware)
 
 app.include_router(health.router)  # no auth, must be registered first
+app.include_router(auth.router, prefix="/api")
 app.include_router(backup.router, prefix="/api")
 app.include_router(history.router, prefix="/api")
 app.include_router(search.router, prefix="/api")

@@ -37,11 +37,20 @@ DEFAULTS: dict[str, str] = {
     "jellyfin_url": "",
     "jellyfin_api_key": "",
     "jellyfin_library_id": "",
+    # Security
+    "ui_password": "",
 }
+
+# Keys stored in the DB but never sent to the frontend
+_PRIVATE_KEYS = {"session_secret"}
 
 
 def _load_settings(db: Session) -> dict[str, str]:
-    db_settings = {s.key: s.value for s in db.query(Setting).all()}
+    db_settings = {
+        s.key: s.value
+        for s in db.query(Setting).all()
+        if s.key not in _PRIVATE_KEYS
+    }
     return {**DEFAULTS, **db_settings}
 
 
