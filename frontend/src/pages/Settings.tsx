@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
 import { api, type DownloadPath, type JellyfinTestResult, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { authStore } from "../auth";
 
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
@@ -125,6 +126,17 @@ export default function Settings() {
   const [restoreResult,    setRestoreResult]    = useState<RestoreResponse | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  const handleRevokeAllSessions = async () => {
+    if (!confirm("This will sign out all active sessions. Continue?")) return;
+    try {
+      await api.auth.revoke();
+      authStore.clearToken();
+      showToast("All sessions revoked.");
+    } catch (e: unknown) {
+      showToast(`Error: ${(e as Error).message}`);
+    }
+  };
 
   const load = async () => {
     const [s, p] = await Promise.all([api.settings.get(), api.paths.list()]);
@@ -582,6 +594,35 @@ export default function Settings() {
                 {restoreResult.ok ? restoreResult.message : restoreResult.error}
               </div>
             )}
+          </div>
+        </Section>
+
+        {/* Security */}
+        <Section title="Security">
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Set a password to require login when AutoRrent is accessed via Cloudflare tunnel.
+            Local network access is always unrestricted. Leave blank to disable authentication.
+          </p>
+          <div className="space-y-3">
+            <Field
+              label="UI Password"
+              type="password"
+              value={settings.ui_password ?? ""}
+              onChange={(v) => set("ui_password", v)}
+              placeholder="Leave blank to disable auth"
+            />
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Changing the password immediately invalidates all active sessions.
+            </p>
+            <button
+              onClick={handleRevokeAllSessions}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600
+                         px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300
+                         hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-600 dark:hover:text-red-400
+                         hover:border-red-300 dark:hover:border-red-700 transition-colors"
+            >
+              Revoke all sessions
+            </button>
           </div>
         </Section>
 
