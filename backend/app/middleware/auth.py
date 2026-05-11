@@ -17,8 +17,12 @@ def _make_token(secret: str, password: str) -> str:
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # OPTIONS (CORS pre-flights) and exempt paths always pass through
-        if request.method == "OPTIONS" or request.url.path in _EXEMPT:
+        # OPTIONS (CORS pre-flights) and non-API paths (static files, SPA) always pass through
+        if request.method == "OPTIONS" or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+
+        # Specific exempt API paths (login, status)
+        if request.url.path in _EXEMPT:
             return await call_next(request)
 
         # No CF-Connecting-IP header → local network access → always allowed
