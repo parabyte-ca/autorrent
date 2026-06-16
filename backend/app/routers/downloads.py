@@ -11,7 +11,7 @@ from ..models import Download, DownloadHistory, DownloadPath, Setting
 from ..schemas import DownloadCreate, DuplicateCheckRequest
 from ..services.duplicate import check_duplicate
 from ..services.media_servers import trigger_media_refresh
-from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_torrent_status, remove_torrent
+from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_all_torrent_statuses, get_torrent_status, remove_torrent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -95,6 +95,17 @@ def get_downloads(db: Session = Depends(get_db)):
     downloads = db.query(Download).order_by(Download.created_at.desc()).all()
     result = []
 
+    # Fetch ALL torrent statuses in a single qBittorrent API call.
+    # Returns None if qBittorrent is unreachable (we skip status updates in that case).
+    # Returns {} if qBittorrent is reachable but has no torrents.
+    # A hash absent from the dict means that specific torrent was removed from qBittorrent.
+    needs_qbit = any(
+        d.torrent_hash and not d.qbit_removed and d.status not in ("error", "done")
+        for d in downloads
+    )
+    all_statuses: dict[str, dict] | None = get_all_torrent_statuses() if needs_qbit else {}
+    qbit_up = all_statuses is not None
+
     for d in downloads:
         item = {
             "id": d.id,
@@ -110,25 +121,24 @@ def get_downloads(db: Session = Depends(get_db)):
             "dlspeed": None,
         }
 
-        # Skip qBittorrent query for torrents we've already removed or
-        # that are in a terminal error / legacy-done state.
         skip_qbit = (
             not d.torrent_hash
             or d.qbit_removed
             or d.status in ("error", "done")
+            or not qbit_up
         )
 
         if not skip_qbit:
             try:
-                qs = get_torrent_status(d.torrent_hash)
+                # all_statuses is a dict here (qbit_up is True)
+                qs = all_statuses.get(d.torrent_hash)  # type: ignore[union-attr]
 
                 if qs is None:
-                    # Torrent not found in qBittorrent.
+                    # qBittorrent is reachable but this torrent is gone from it.
+                    # It was removed (by qBit's own remove-on-complete, by AutoRrent's
+                    # scheduler, or manually) before the Downloads page saw its
+                    # finished state.  Mark it done so it stops showing as Downloading.
                     if d.status == "downloading":
-                        # Never saw it complete — it was removed from qBittorrent before
-                        # the Downloads page had a chance to observe the finished state
-                        # (common when remove_on_complete is on in qBittorrent itself).
-                        # Mark it done so it stops showing as "Downloading".
                         d.status = "completed"
                         item["status"] = "completed"
                         d.qbit_removed = True

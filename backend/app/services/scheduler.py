@@ -281,7 +281,7 @@ def _sync_download_statuses() -> None:
 
     from ..database import SessionLocal
     from ..models import Download, DownloadHistory
-    from .qbittorrent import get_torrent_status
+    from .qbittorrent import get_all_torrent_statuses
 
     _COMPLETE = {
         "uploading", "stalledUP", "checkingUP", "forcedUP",
@@ -300,17 +300,26 @@ def _sync_download_statuses() -> None:
             .all()
         )
 
+        if not active:
+            return
+
+        # Fetch all statuses in one API call.  None = qBittorrent unreachable;
+        # skip updates entirely so we don't falsely mark torrents completed.
+        all_statuses = get_all_torrent_statuses()
+        if all_statuses is None:
+            logger.warning("Status sync: qBittorrent unreachable — skipping.")
+            return
+
         for dl in active:
             try:
-                qs = get_torrent_status(dl.torrent_hash)
+                qs = all_statuses.get(dl.torrent_hash)
 
                 if qs is None:
-                    # Gone from qBittorrent — treat as completed
+                    # Absent from qBittorrent (not just unreachable) — treat as completed.
                     dl.status = "completed"
                     dl.qbit_removed = True
                     if dl.completion_first_seen_at is None:
                         dl.completion_first_seen_at = datetime.utcnow()
-                    # Best-effort history update
                     try:
                         hist = (
                             db.query(DownloadHistory)
