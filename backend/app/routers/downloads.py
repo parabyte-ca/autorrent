@@ -123,9 +123,25 @@ def get_downloads(db: Session = Depends(get_db)):
                 qs = get_torrent_status(d.torrent_hash)
 
                 if qs is None:
-                    # Torrent not found in qBittorrent — removed externally.
-                    # If we're past the grace period mark it cleaned up.
-                    if (d.status == "completed"
+                    # Torrent not found in qBittorrent.
+                    if d.status == "downloading":
+                        # Never saw it complete — it was removed from qBittorrent before
+                        # the Downloads page had a chance to observe the finished state
+                        # (common when remove_on_complete is on in qBittorrent itself).
+                        # Mark it done so it stops showing as "Downloading".
+                        d.status = "completed"
+                        item["status"] = "completed"
+                        d.qbit_removed = True
+                        if d.completion_first_seen_at is None:
+                            d.completion_first_seen_at = datetime.utcnow()
+                        _update_history_completed(db, d.torrent_hash, d.size_bytes)
+                        logger.info(
+                            "Torrent '%s' (%s) gone from qBittorrent while still"
+                            " 'downloading' — marking completed.",
+                            d.title, d.torrent_hash,
+                        )
+                        db.commit()
+                    elif (d.status == "completed"
                             and d.completion_first_seen_at is not None
                             and datetime.utcnow() - d.completion_first_seen_at >= _GRACE_PERIOD):
                         d.qbit_removed = True
