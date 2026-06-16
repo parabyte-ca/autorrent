@@ -204,6 +204,7 @@ def scan_watchlist() -> None:
         db.close()
 
     logger.info("Watchlist scan complete")
+    _sync_download_statuses()
     _cleanup_completed()
 
 
@@ -264,6 +265,97 @@ def check_show_statuses(item_id: int | None = None) -> None:
         asyncio.run(_check_statuses_async(db, item_id=item_id))
     except Exception as exc:
         logger.error("check_show_statuses failed: %s", exc)
+    finally:
+        db.close()
+
+
+def _sync_download_statuses() -> None:
+    """Poll qBittorrent for all active downloads and advance their status in the DB.
+
+    This runs on every scan cycle so that completed torrents are detected even
+    when nobody has the Downloads page open.  Without this, a torrent that
+    finishes (and is removed from qBittorrent) between page loads stays stuck
+    at 'downloading' forever and is never picked up by _cleanup_completed().
+    """
+    from datetime import datetime
+
+    from ..database import SessionLocal
+    from ..models import Download, DownloadHistory
+    from .qbittorrent import get_all_torrent_statuses
+
+    _COMPLETE = {
+        "uploading", "stalledUP", "checkingUP", "forcedUP",
+        "pausedUP", "completed", "moving",
+    }
+
+    db = SessionLocal()
+    try:
+        active = (
+            db.query(Download)
+            .filter(
+                Download.status == "downloading",
+                Download.qbit_removed == False,
+                Download.torrent_hash != None,
+            )
+            .all()
+        )
+
+        if not active:
+            return
+
+        # Fetch all statuses in one API call.  None = qBittorrent unreachable;
+        # skip updates entirely so we don't falsely mark torrents completed.
+        all_statuses = get_all_torrent_statuses()
+        if all_statuses is None:
+            logger.warning("Status sync: qBittorrent unreachable — skipping.")
+            return
+
+        for dl in active:
+            try:
+                qs = all_statuses.get(dl.torrent_hash)
+
+                if qs is None:
+                    # Absent from qBittorrent (not just unreachable) — treat as completed.
+                    dl.status = "completed"
+                    dl.qbit_removed = True
+                    if dl.completion_first_seen_at is None:
+                        dl.completion_first_seen_at = datetime.utcnow()
+                    try:
+                        hist = (
+                            db.query(DownloadHistory)
+                            .filter(
+                                DownloadHistory.torrent_hash == dl.torrent_hash,
+                                DownloadHistory.status == "downloading",
+                            )
+                            .order_by(DownloadHistory.added_at.desc())
+                            .first()
+                        )
+                        if hist:
+                            hist.status = "completed"
+                            hist.completed_at = datetime.utcnow()
+                    except Exception:
+                        pass
+                    logger.info(
+                        "Status sync: '%s' gone from qBittorrent — marked completed.",
+                        dl.title,
+                    )
+
+                elif qs.get("status") in _COMPLETE:
+                    if dl.status != "completed":
+                        dl.status = "completed"
+                    if dl.completion_first_seen_at is None and qs.get("status") != "moving":
+                        dl.completion_first_seen_at = datetime.utcnow()
+                    if dl.size_bytes is None and qs.get("size"):
+                        dl.size_bytes = qs["size"]
+                    logger.debug("Status sync: '%s' marked completed.", dl.title)
+
+            except Exception as e:
+                logger.error("Status sync failed for '%s': %s", dl.title, e)
+
+        db.commit()
+
+    except Exception as e:
+        logger.error("Download status sync failed: %s", e)
     finally:
         db.close()
 

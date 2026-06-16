@@ -55,22 +55,41 @@ def add_torrent(magnet: str, save_path: str, category: str | None = None) -> str
     return _hash_from_magnet(magnet)
 
 
+def _torrent_to_dict(t) -> dict:
+    return {
+        "status": t.state,
+        "progress": round(t.progress, 4),
+        "size": t.size,
+        "dlspeed": t.dlspeed,
+        "eta": t.eta,
+    }
+
+
 def get_torrent_status(info_hash: str) -> dict | None:
     try:
         client = _get_client()
         torrents = client.torrents_info(torrent_hashes=info_hash)
         if torrents:
-            t = torrents[0]
-            return {
-                "status": t.state,
-                "progress": round(t.progress, 4),
-                "size": t.size,
-                "dlspeed": t.dlspeed,
-                "eta": t.eta,
-            }
+            return _torrent_to_dict(torrents[0])
     except Exception:
         pass
     return None
+
+
+def get_all_torrent_statuses() -> dict[str, dict] | None:
+    """Fetch every torrent's status in one API call.
+
+    Returns a dict mapping lowercase info_hash -> status dict, or None
+    if qBittorrent is unreachable.  Callers can safely treat a hash
+    that is absent from the returned dict as "removed from qBittorrent"
+    (distinct from None which means "could not connect at all").
+    """
+    try:
+        client = _get_client()
+        return {t.hash.lower(): _torrent_to_dict(t) for t in client.torrents_info()}
+    except Exception as e:
+        logger.warning("Failed to fetch all torrent statuses: %s", e)
+        return None
 
 
 def remove_torrent(info_hash: str, delete_files: bool = False) -> None:
