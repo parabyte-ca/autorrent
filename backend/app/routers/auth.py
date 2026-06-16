@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import secrets
 import time
 from collections import defaultdict
@@ -10,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Setting
+from ..services.token import make_token
 
 router = APIRouter(tags=["auth"])
 
@@ -22,15 +21,16 @@ _RATE_LIMIT = 5
 def _check_rate_limit(ip: str) -> None:
     now = time.time()
     cutoff = now - _RATE_WINDOW
-    recent = [t for t in _ATTEMPTS[ip] if t > cutoff]
-    _ATTEMPTS[ip] = recent
-    if len(recent) >= _RATE_LIMIT:
+    # Prune stale entries for current IP
+    _ATTEMPTS[ip] = [t for t in _ATTEMPTS[ip] if t > cutoff]
+    # Periodically purge IPs with no recent attempts (every ~100 calls)
+    if len(_ATTEMPTS) > 500:
+        stale = [k for k, v in _ATTEMPTS.items() if not v or max(v) < cutoff]
+        for k in stale:
+            del _ATTEMPTS[k]
+    if len(_ATTEMPTS[ip]) >= _RATE_LIMIT:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 5 minutes.")
     _ATTEMPTS[ip].append(now)
-
-
-def _make_token(secret: str, password: str) -> str:
-    return hmac.new(secret.encode(), password.encode(), hashlib.sha256).hexdigest()
 
 
 def _get_or_create_secret(db: Session) -> str:
@@ -75,7 +75,7 @@ def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Incorrect password.")
 
     secret = _get_or_create_secret(db)
-    return {"token": _make_token(secret, stored)}
+    return {"token": make_token(secret, stored)}
 
 
 @router.post("/auth/revoke")

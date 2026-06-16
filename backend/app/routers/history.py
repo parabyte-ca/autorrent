@@ -15,7 +15,7 @@ underlying torrent in qBittorrent.
 import csv
 import io
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -109,7 +109,7 @@ def export_history_csv(db: Session = Depends(get_db)):
         ])
 
     buf.seek(0)
-    today = datetime.utcnow().strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     filename = f"autorrent-history-{today}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),

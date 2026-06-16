@@ -2,7 +2,7 @@ import urllib.parse
 
 import httpx
 
-from .nyaa import TRACKER_PARAMS
+from .utils import TRACKER_PARAMS, fmt_size
 
 YTS_API = "https://yts.mx/api/v2/list_movies.json"
 
@@ -44,7 +44,7 @@ def search_yts(query: str) -> list[dict]:
             seeds = int(torrent.get("seeds") or 0)
             leeches = int(torrent.get("peers") or 0)
             size_bytes = int(torrent.get("size_bytes") or 0)
-            size = torrent.get("size") or _fmt_size(size_bytes)
+            size = torrent.get("size") or fmt_size(size_bytes)
 
             torrent_title = f"{title} [{quality_raw}] [YTS]"
             magnet = (
@@ -67,11 +67,3 @@ def search_yts(query: str) -> list[dict]:
             })
 
     return results
-
-
-def _fmt_size(b: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if b < 1024:
-            return f"{b:.1f} {unit}"
-        b //= 1024
-    return f"{b:.1f} PB"

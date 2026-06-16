@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -64,7 +64,7 @@ def _update_history_completed(db: Session, torrent_hash: str, size_bytes: int | 
         )
         if hist:
             hist.status = "completed"
-            hist.completed_at = datetime.utcnow()
+            hist.completed_at = datetime.now(timezone.utc)
             if hist.size_bytes is None and size_bytes:
                 hist.size_bytes = size_bytes
     except Exception as e:
@@ -106,6 +106,8 @@ def get_downloads(db: Session = Depends(get_db)):
     all_statuses: dict[str, dict] | None = get_all_torrent_statuses() if needs_qbit else {}
     qbit_up = all_statuses is not None
 
+    _settings_cache: dict | None = None
+
     for d in downloads:
         item = {
             "id": d.id,
@@ -143,7 +145,7 @@ def get_downloads(db: Session = Depends(get_db)):
                         item["status"] = "completed"
                         d.qbit_removed = True
                         if d.completion_first_seen_at is None:
-                            d.completion_first_seen_at = datetime.utcnow()
+                            d.completion_first_seen_at = datetime.now(timezone.utc)
                         _update_history_completed(db, d.torrent_hash, d.size_bytes)
                         logger.info(
                             "Torrent '%s' (%s) gone from qBittorrent while still"
@@ -153,7 +155,7 @@ def get_downloads(db: Session = Depends(get_db)):
                         db.commit()
                     elif (d.status == "completed"
                             and d.completion_first_seen_at is not None
-                            and datetime.utcnow() - d.completion_first_seen_at >= _GRACE_PERIOD):
+                            and datetime.now(timezone.utc) - d.completion_first_seen_at >= _GRACE_PERIOD):
                         d.qbit_removed = True
                         logger.info(
                             "Torrent '%s' (%s) absent from qBittorrent — marking removed.",
@@ -178,18 +180,19 @@ def get_downloads(db: Session = Depends(get_db)):
 
                         # Start grace-period clock once out of "moving".
                         if d.completion_first_seen_at is None and qstate != "moving":
-                            d.completion_first_seen_at = datetime.utcnow()
+                            d.completion_first_seen_at = datetime.now(timezone.utc)
 
                         db.commit()
 
                         # After grace period: fire hooks then remove from qBittorrent.
                         if (d.completion_first_seen_at is not None
                                 and not d.qbit_removed
-                                and datetime.utcnow() - d.completion_first_seen_at >= _GRACE_PERIOD):
+                                and datetime.now(timezone.utc) - d.completion_first_seen_at >= _GRACE_PERIOD):
 
                             # 1. Plex / Jellyfin library refresh
-                            settings_dict = {s.key: s.value for s in db.query(Setting).all()}
-                            _fire_media_refresh(settings_dict)
+                            if _settings_cache is None:
+                                _settings_cache = {s.key: s.value for s in db.query(Setting).all()}
+                            _fire_media_refresh(_settings_cache)
 
                             # 2. Remove from qBittorrent (files are always kept)
                             try:
@@ -221,8 +224,8 @@ def get_downloads(db: Session = Depends(get_db)):
                             _update_history_failed(db, d.torrent_hash, qstate)
                         db.commit()
 
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Error updating status for download %d ('%s'): %s", d.id, d.title, e)
 
         result.append(item)
 

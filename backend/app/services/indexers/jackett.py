@@ -1,10 +1,11 @@
 import httpx
 
-from .nyaa import _quality
+from .utils import quality
 
 
 def search_jackett(query: str, jackett_url: str, api_key: str) -> list[dict]:
     base = jackett_url.rstrip("/")
+    is_prowlarr = False
 
     # Try Prowlarr API first (/api/v1/search), fall back to Jackett (/api/v2.0/...)
     with httpx.Client(timeout=30) as client:
@@ -14,12 +15,15 @@ def search_jackett(query: str, jackett_url: str, api_key: str) -> list[dict]:
             # Jackett fallback
             jackett_api_url = f"{base}/api/v2.0/indexers/all/results"
             r = client.get(jackett_api_url, params={"apikey": api_key, "Query": query})
+        else:
+            is_prowlarr = True
         r.raise_for_status()
         data = r.json()
 
     # Prowlarr returns a plain array; Jackett wraps results in {"Results": [...]}
     items = data if isinstance(data, list) else data.get("Results", [])
 
+    prefix = "prowlarr" if is_prowlarr else "jackett"
     results = []
     for item in items:
         # Prowlarr uses magnetUrl/downloadUrl; Jackett uses MagnetUri/Link
@@ -42,8 +46,8 @@ def search_jackett(query: str, jackett_url: str, api_key: str) -> list[dict]:
             "leeches": leeches,
             "magnet": magnet,
             "info_hash": info_hash,
-            "quality": _quality(title),
-            "source": f"prowlarr/{indexer}",
+            "quality": quality(title),
+            "source": f"{prefix}/{indexer}",
             "url": item.get("infoUrl") or item.get("Details", ""),
         })
 

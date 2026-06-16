@@ -3,7 +3,8 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from .nyaa import TRACKER_PARAMS, _quality, _parse_size
+from .nyaa import _parse_size
+from .utils import TRACKER_PARAMS, fmt_size, quality
 
 TGX_RSS = "https://torrentgalaxy.to/rss.php"
 
@@ -79,13 +80,13 @@ def search_torrentgalaxy(query: str) -> list[dict]:
 
         results.append({
             "title": title,
-            "size": size_str if not size_str.isdigit() else _fmt_size(size_bytes),
+            "size": size_str if not size_str.isdigit() else fmt_size(size_bytes),
             "size_bytes": size_bytes,
             "seeds": seeds,
             "leeches": leeches,
             "magnet": magnet,
             "info_hash": info_hash,
-            "quality": _quality(title),
+            "quality": quality(title),
             "source": "tgx",
             "url": url,
         })
@@ -98,11 +99,3 @@ def _int(val: str | None) -> int:
         return int(val or 0)
     except (ValueError, TypeError):
         return 0
-
-
-def _fmt_size(b: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if b < 1024:
-            return f"{b:.1f} {unit}"
-        b //= 1024
-    return f"{b:.1f} PB"

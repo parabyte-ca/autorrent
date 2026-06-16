@@ -11,7 +11,8 @@ PORT="8180:8000"
 DATA_VOLUME="/mnt/shared_vol/websites/autorrent/data:/app/data"
 
 echo "==> Pulling latest code from GitHub..."
-git pull origin "$BRANCH"
+# git pull must run as the invoking user (not root) so their SSH key is available.
+sudo -u "${SUDO_USER:-$(logname)}" git pull origin "$BRANCH"
 
 echo "==> Building Docker image..."
 docker build -t "$IMAGE" .

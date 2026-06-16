@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 _scheduler = BackgroundScheduler(timezone="UTC")
 
 
-def scan_watchlist() -> None:
+def scan_watchlist(target_item_id: int | None = None) -> None:
     """Scan all enabled watchlist items and auto-download new episodes."""
     from sqlalchemy.exc import IntegrityError
     from ..database import SessionLocal
@@ -27,11 +27,14 @@ def scan_watchlist() -> None:
         category = settings.get("qbit_category", "autorrent")
         apprise_url = settings.get("apprise_url", "")
 
-        items = db.query(WatchlistItem).filter(WatchlistItem.enabled == True).all()
+        query = db.query(WatchlistItem).filter(WatchlistItem.enabled == True)
+        if target_item_id is not None:
+            query = query.filter(WatchlistItem.id == target_item_id)
+        items = query.all()
         logger.info("Watchlist scan started — %d item(s)", len(items))
 
         for item in items:
-            item.last_checked = datetime.utcnow()
+            item.last_checked = datetime.now(timezone.utc)
             db.commit()
 
             try:
@@ -147,7 +150,7 @@ def scan_watchlist() -> None:
                 db.add(dl)
 
                 item.episode += 1
-                item.last_found = datetime.utcnow()
+                item.last_found = datetime.now(timezone.utc)
                 db.commit()
 
                 # Record the episode as downloaded — best-effort, must not block the scan.
@@ -228,7 +231,7 @@ async def _check_statuses_async(db, *, item_id: int | None = None) -> None:
         try:
             status, tvmaze_id = await get_show_status(item.title, item.tvmaze_id)
 
-            item.show_status_checked_at = datetime.utcnow()
+            item.show_status_checked_at = datetime.now(timezone.utc)
 
             if status != "Unknown":
                 item.show_status = status
@@ -277,8 +280,6 @@ def _sync_download_statuses() -> None:
     finishes (and is removed from qBittorrent) between page loads stays stuck
     at 'downloading' forever and is never picked up by _cleanup_completed().
     """
-    from datetime import datetime
-
     from ..database import SessionLocal
     from ..models import Download, DownloadHistory
     from .qbittorrent import get_all_torrent_statuses
@@ -319,7 +320,7 @@ def _sync_download_statuses() -> None:
                     dl.status = "completed"
                     dl.qbit_removed = True
                     if dl.completion_first_seen_at is None:
-                        dl.completion_first_seen_at = datetime.utcnow()
+                        dl.completion_first_seen_at = datetime.now(timezone.utc)
                     try:
                         hist = (
                             db.query(DownloadHistory)
@@ -332,7 +333,7 @@ def _sync_download_statuses() -> None:
                         )
                         if hist:
                             hist.status = "completed"
-                            hist.completed_at = datetime.utcnow()
+                            hist.completed_at = datetime.now(timezone.utc)
                     except Exception:
                         pass
                     logger.info(
@@ -343,8 +344,24 @@ def _sync_download_statuses() -> None:
                 elif qs.get("status") in _COMPLETE:
                     if dl.status != "completed":
                         dl.status = "completed"
+                        # Also update the history record
+                        try:
+                            hist = (
+                                db.query(DownloadHistory)
+                                .filter(
+                                    DownloadHistory.torrent_hash == dl.torrent_hash,
+                                    DownloadHistory.status == "downloading",
+                                )
+                                .order_by(DownloadHistory.added_at.desc())
+                                .first()
+                            )
+                            if hist:
+                                hist.status = "completed"
+                                hist.completed_at = datetime.now(timezone.utc)
+                        except Exception:
+                            pass
                     if dl.completion_first_seen_at is None and qs.get("status") != "moving":
-                        dl.completion_first_seen_at = datetime.utcnow()
+                        dl.completion_first_seen_at = datetime.now(timezone.utc)
                     if dl.size_bytes is None and qs.get("size"):
                         dl.size_bytes = qs["size"]
                     logger.debug("Status sync: '%s' marked completed.", dl.title)
@@ -367,8 +384,10 @@ def _cleanup_completed() -> None:
     to set qbit_removed=True instead of status='done', keeping status consistent
     with the polling-loop auto-cleanup in the downloads router.
     """
+    import threading
     from ..database import SessionLocal
     from ..models import Download, Setting
+    from .media_servers import trigger_media_refresh
     from .qbittorrent import remove_torrent
 
     db = SessionLocal()
@@ -386,17 +405,28 @@ def _cleanup_completed() -> None:
             )
             .all()
         )
+        fired_refresh = False
         for dl in candidates:
             if not dl.torrent_hash:
                 continue
             try:
                 remove_torrent(dl.torrent_hash, delete_files=False)
                 dl.qbit_removed = True
+                fired_refresh = True
                 logger.info("Removed completed torrent from qBittorrent: %s", dl.title)
             except Exception as e:
                 logger.warning("Could not remove torrent %s: %s", dl.torrent_hash, e)
 
         db.commit()
+
+        if fired_refresh:
+            def _do_refresh():
+                try:
+                    asyncio.run(trigger_media_refresh(settings))
+                except Exception as e:
+                    logger.warning("Media refresh failed after cleanup: %s", e)
+            threading.Thread(target=_do_refresh, daemon=True).start()
+
     except Exception as e:
         logger.error("Cleanup failed: %s", e)
     finally:
