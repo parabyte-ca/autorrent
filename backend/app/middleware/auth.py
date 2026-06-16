@@ -1,4 +1,3 @@
-import hashlib
 import hmac
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -7,12 +6,9 @@ from starlette.responses import JSONResponse
 
 from ..database import SessionLocal
 from ..models import Setting
+from ..services.token import make_token
 
 _EXEMPT = {"/health", "/api/auth/login", "/api/auth/status"}
-
-
-def _make_token(secret: str, password: str) -> str:
-    return hmac.new(secret.encode(), password.encode(), hashlib.sha256).hexdigest()
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -56,7 +52,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not secret:
             return JSONResponse({"detail": "Auth not initialised. Please log in."}, status_code=401)
 
-        expected = _make_token(secret, password)
+        expected = make_token(secret, password)
         if not hmac.compare_digest(expected, candidate):
             return JSONResponse({"detail": "Invalid or expired token."}, status_code=401)
 

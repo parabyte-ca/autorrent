@@ -42,7 +42,7 @@ def _get_client() -> qbittorrentapi.Client:
 
 
 def _hash_from_magnet(magnet: str) -> str | None:
-    match = re.search(r"btih:([a-fA-F0-9]{40})", magnet, re.IGNORECASE)
+    match = re.search(r"btih:([a-fA-F0-9]{40,64})", magnet, re.IGNORECASE)
     return match.group(1).lower() if match else None
 
 

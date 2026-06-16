@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.exc import IntegrityError
@@ -71,7 +71,7 @@ def scan_single_item(item_id: int, db: Session = Depends(get_db)):
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
     from ..services.scheduler import scan_watchlist
-    threading.Thread(target=scan_watchlist, daemon=True).start()
+    threading.Thread(target=lambda: scan_watchlist(target_item_id=item_id), daemon=True).start()
     return {"ok": True, "message": "Scan triggered"}
 
 
@@ -117,7 +117,7 @@ def mark_episode(
         season=payload.season,
         episode=payload.episode,
         torrent_name=payload.torrent_name,
-        downloaded_at=datetime.utcnow(),
+        downloaded_at=datetime.now(timezone.utc),
     )
     db.add(ep)
     try:

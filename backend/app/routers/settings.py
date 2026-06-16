@@ -62,6 +62,8 @@ def get_settings(db: Session = Depends(get_db)):
 @router.put("/settings")
 def update_settings(updates: dict, db: Session = Depends(get_db)):
     for key, value in updates.items():
+        if key in _PRIVATE_KEYS:
+            continue
         setting = db.query(Setting).filter(Setting.key == key).first()
         str_val = str(value) if value is not None else ""
         if setting:
