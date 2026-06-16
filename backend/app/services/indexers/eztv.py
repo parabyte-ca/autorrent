@@ -2,7 +2,7 @@ import re
 
 import httpx
 
-from .nyaa import _quality
+from .utils import fmt_size, quality
 
 EZTV_API = "https://eztvx.to/api/get-torrents"
 
@@ -58,23 +58,15 @@ def search_eztv(query: str) -> list[dict]:
 
         results.append({
             "title": title,
-            "size": _fmt_size(size_bytes),
+            "size": fmt_size(size_bytes),
             "size_bytes": size_bytes,
             "seeds": seeds,
             "leeches": leeches,
             "magnet": magnet,
             "info_hash": info_hash,
-            "quality": _quality(title),
+            "quality": quality(title),
             "source": "eztv",
             "url": f"https://eztvx.to/ep/{item.get('id', '')}",
         })
 
     return results
-
-
-def _fmt_size(b: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if b < 1024:
-            return f"{b:.1f} {unit}"
-        b //= 1024
-    return f"{b:.1f} PB"

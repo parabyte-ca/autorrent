@@ -21,9 +21,14 @@ _RATE_LIMIT = 5
 def _check_rate_limit(ip: str) -> None:
     now = time.time()
     cutoff = now - _RATE_WINDOW
-    recent = [t for t in _ATTEMPTS[ip] if t > cutoff]
-    _ATTEMPTS[ip] = recent
-    if len(recent) >= _RATE_LIMIT:
+    # Prune stale entries for current IP
+    _ATTEMPTS[ip] = [t for t in _ATTEMPTS[ip] if t > cutoff]
+    # Periodically purge IPs with no recent attempts (every ~100 calls)
+    if len(_ATTEMPTS) > 500:
+        stale = [k for k, v in _ATTEMPTS.items() if not v or max(v) < cutoff]
+        for k in stale:
+            del _ATTEMPTS[k]
+    if len(_ATTEMPTS[ip]) >= _RATE_LIMIT:
         raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 5 minutes.")
     _ATTEMPTS[ip].append(now)
 

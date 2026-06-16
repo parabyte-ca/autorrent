@@ -2,17 +2,9 @@ import urllib.parse
 
 import httpx
 
-from .nyaa import TRACKER_PARAMS, _quality
+from .utils import TRACKER_PARAMS, fmt_size, quality
 
 TPB_API = "https://apibay.org/q.php"
-
-
-def _fmt_size(b: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if b < 1024:
-            return f"{b:.1f} {unit}"
-        b //= 1024
-    return f"{b:.1f} PB"
 
 
 def search_tpb(query: str) -> list[dict]:
@@ -43,13 +35,13 @@ def search_tpb(query: str) -> list[dict]:
 
         results.append({
             "title": name,
-            "size": _fmt_size(size_bytes),
+            "size": fmt_size(size_bytes),
             "size_bytes": size_bytes,
             "seeds": seeds,
             "leeches": leeches,
             "magnet": magnet,
             "info_hash": info_hash,
-            "quality": _quality(name),
+            "quality": quality(name),
             "source": "tpb",
             "url": f"https://thepiratebay.org/description.php?id={item.get('id', '')}",
             "_tpb_category": int(item.get("category", 0)),

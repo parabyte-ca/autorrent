@@ -3,13 +3,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-TRACKERS = [
-    "udp://open.stealth.si:80/announce",
-    "udp://tracker.opentrackr.org:1337/announce",
-    "udp://tracker.openbittorrent.com:6969/announce",
-    "udp://tracker.torrent.eu.org:451/announce",
-]
-TRACKER_PARAMS = "&".join(f"tr={urllib.parse.quote(t)}" for t in TRACKERS)
+from .utils import TRACKER_PARAMS, quality
 
 NYAA_NS = "https://nyaa.si/xmlns/nyaa"
 
@@ -23,19 +17,6 @@ def _parse_size(size_str: str) -> int:
     units = {"GiB": 1 << 30, "MiB": 1 << 20, "KiB": 1 << 10,
              "GB": 10**9, "MB": 10**6, "KB": 10**3, "B": 1}
     return int(num * units.get(m.group(2), 1))
-
-
-def _quality(title: str) -> str:
-    t = title.lower()
-    if "2160p" in t or "4k" in t:
-        return "4K"
-    if "1080p" in t:
-        return "1080p"
-    if "720p" in t:
-        return "720p"
-    if "480p" in t:
-        return "480p"
-    return "Unknown"
 
 
 def search_nyaa(query: str) -> list[dict]:
@@ -76,7 +57,7 @@ def search_nyaa(query: str) -> list[dict]:
             "leeches": leeches,
             "magnet": magnet,
             "info_hash": info_hash,
-            "quality": _quality(title),
+            "quality": quality(title),
             "source": "nyaa",
             "url": f"https://nyaa.si/view/{torrent_id}",
         })

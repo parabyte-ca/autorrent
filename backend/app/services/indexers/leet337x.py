@@ -1,9 +1,12 @@
+import logging
 import re
 import urllib.parse
 
 import httpx
 
-from .nyaa import TRACKER_PARAMS, _quality
+from .utils import TRACKER_PARAMS, quality
+
+logger = logging.getLogger(__name__)
 
 BASE = "https://1337x.to"
 _MAX_RESULTS = 5
@@ -71,11 +74,12 @@ def search_1337x(query: str) -> list[dict]:
                     "leeches": leeches,
                     "magnet": magnet,
                     "info_hash": info_hash,
-                    "quality": _quality(title),
+                    "quality": quality(title),
                     "source": "1337x",
                     "url": f"{BASE}{path}",
                 })
-            except Exception:
+            except Exception as e:
+                logger.debug("1337x: failed to fetch detail for '%s': %s", title, e)
                 continue
 
     return results
