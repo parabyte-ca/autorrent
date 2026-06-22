@@ -1,14 +1,8 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Clock, Download, Loader2, RefreshCw, Trash2, XCircle } from "lucide-react";
 import { api, type Download as DL } from "../api/client";
+import { fmtDate, fmtSize } from "../utils";
 
-function fmtSize(b?: number) {
-  if (!b) return "—";
-  for (const [u, d] of [["TB", 1e12], ["GB", 1e9], ["MB", 1e6], ["KB", 1e3]] as [string, number][]) {
-    if (b >= d) return `${(b / d).toFixed(1)} ${u}`;
-  }
-  return `${b} B`;
-}
 function fmtSpeed(bps?: number) {
   if (!bps) return null;
   return bps >= 1024 * 1024 ? `${(bps / 1024 / 1024).toFixed(1)} MB/s` : `${(bps / 1024).toFixed(0)} KB/s`;
@@ -18,9 +12,6 @@ function fmtEta(s?: number) {
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-}
-function fmtDate(s: string) {
-  return new Date(s).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function StatusBadge({ status }: { status: string }) {

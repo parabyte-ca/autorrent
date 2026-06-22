@@ -22,6 +22,7 @@ import {
   type WatchlistEpisode,
   type WatchlistItem,
 } from "../api/client";
+import { fmtAgo, fmtDate } from "../utils";
 
 const QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
@@ -32,24 +33,8 @@ const FIELD = [
   "dark:bg-gray-800 dark:text-gray-100",
 ].join(" ");
 
-function fmtDate(d?: string) {
-  if (!d) return "Never";
-  return new Date(d).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
 function epLabel(s: number, e: number) {
   return `S${String(s).padStart(2, "0")}E${String(e).padStart(2, "0")}`;
-}
-function fmtAgo(d?: string | null) {
-  if (!d) return null;
-  const diff = Date.now() - new Date(d).getTime();
-  const days = Math.floor(diff / 86_400_000);
-  if (days === 0) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 30) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 8) return `${weeks}w ago`;
-  const months = Math.floor(days / 30);
-  return `${months}mo ago`;
 }
 
 function ShowStatusBadge({ status }: { status: WatchlistItem["show_status"] }) {

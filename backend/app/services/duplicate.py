@@ -24,7 +24,6 @@ def check_duplicate(
     Checks, in order:
       1. Exact hash match in DownloadHistory
       2. Normalised name match in the 500 most recent DownloadHistory rows
-      3. Active torrent hash match in qBittorrent (best-effort, skipped on error)
 
     Always returns a dict and never raises.
     """
@@ -73,22 +72,6 @@ def check_duplicate(
                     "matched_name": row.name,
                     "matched_at": _iso(row.added_at),
                 }
-
-        # 3. Active qBittorrent torrent check (hash only, best-effort)
-        if torrent_hash and torrent_hash.strip():
-            try:
-                from .qbittorrent import _get_client
-                client = _get_client()
-                active = client.torrents_info(torrent_hashes=torrent_hash.strip())
-                if active:
-                    return {
-                        "is_duplicate": True,
-                        "match_type": "active",
-                        "matched_name": active[0].name,
-                        "matched_at": None,
-                    }
-            except Exception as qbit_err:
-                logger.warning("qBittorrent active-torrent check skipped: %s", qbit_err)
 
         return _not_found
 

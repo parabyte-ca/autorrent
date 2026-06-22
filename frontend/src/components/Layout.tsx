@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -33,6 +33,14 @@ const themeButtons: { value: Theme; icon: typeof Sun; title: string }[] = [
 export default function Layout() {
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/health")
+      .then((r) => r.json())
+      .then((d) => setVersion(d.version ?? null))
+      .catch(() => {});
+  }, []);
 
   const handleLogout = () => {
     authStore.clearToken();
@@ -151,7 +159,7 @@ export default function Layout() {
             )}
           </div>
           {!collapsed && (
-            <p className="text-xs text-gray-400 dark:text-gray-600">AutoRrent v1.3</p>
+            {version && <p className="text-xs text-gray-400 dark:text-gray-600">v{version}</p>}
           )}
         </div>
       </aside>

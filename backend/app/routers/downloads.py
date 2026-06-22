@@ -11,7 +11,7 @@ from ..models import Download, DownloadHistory, DownloadPath, Setting
 from ..schemas import DownloadCreate, DuplicateCheckRequest
 from ..services.duplicate import check_duplicate
 from ..services.media_servers import trigger_media_refresh
-from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_all_torrent_statuses, get_torrent_status, remove_torrent
+from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_all_torrent_statuses, remove_torrent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

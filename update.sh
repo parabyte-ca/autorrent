@@ -4,7 +4,7 @@
 
 set -e
 
-BRANCH="claude/plan-torrent-downloader-C5bR9"
+BRANCH="main"
 IMAGE="autorrent-autorrent"
 CONTAINER="autorrent-autorrent-1"
 PORT="8180:8000"
