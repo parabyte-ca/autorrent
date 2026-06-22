@@ -10,6 +10,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 logger = logging.getLogger(__name__)
 _scheduler = BackgroundScheduler(timezone="UTC")
 
+# Stop-words excluded when matching query terms against result titles.
+_STOP_WORDS = frozenset({
+    "the", "a", "an", "of", "and", "in", "is", "to", "at", "for", "on",
+})
+
 
 def scan_watchlist(target_item_id: int | None = None) -> None:
     """Scan all enabled watchlist items and auto-download new episodes."""
@@ -76,10 +81,9 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                 # Episode-tag alone is not enough: two different shows can share
                 # the same SxxExx number. Also require at least one significant
                 # word from the show's search query to appear in the result title.
-                _STOP = {"the", "a", "an", "of", "and", "in", "is", "to", "at", "for", "on"}
                 query_words = {
                     w for w in re.sub(r"[^a-z0-9]", " ", item.search_query.lower()).split()
-                    if len(w) > 1 and w not in _STOP
+                    if len(w) > 1 and w not in _STOP_WORDS
                 }
                 if query_words:
                     results = [
@@ -378,12 +382,7 @@ def _sync_download_statuses() -> None:
 
 
 def _cleanup_completed() -> None:
-    """Remove completed torrents from qBittorrent when remove_on_complete is enabled.
-
-    Updated in v2.1 to query 'completed' status (replacing old 'seeding') and
-    to set qbit_removed=True instead of status='done', keeping status consistent
-    with the polling-loop auto-cleanup in the downloads router.
-    """
+    """Remove completed torrents from qBittorrent when remove_on_complete is enabled."""
     import threading
     from ..database import SessionLocal
     from ..models import Download, Setting

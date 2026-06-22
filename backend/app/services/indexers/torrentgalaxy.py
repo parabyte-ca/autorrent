@@ -3,8 +3,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from .nyaa import _parse_size
-from .utils import TRACKER_PARAMS, fmt_size, quality
+from .utils import TRACKER_PARAMS, fmt_size, parse_size, quality
 
 TGX_RSS = "https://torrentgalaxy.to/rss.php"
 
@@ -74,7 +73,7 @@ def search_torrentgalaxy(query: str) -> list[dict]:
             szm = re.search(r'(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)\b', desc, re.I)
             if szm:
                 size_str = szm.group(0)
-                size_bytes = _parse_size(size_str)
+                size_bytes = parse_size(size_str)
 
         url = item.findtext("comments") or item.findtext("link") or ""
 

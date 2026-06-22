@@ -3,20 +3,9 @@ import xml.etree.ElementTree as ET
 
 import httpx
 
-from .utils import TRACKER_PARAMS, quality
+from .utils import TRACKER_PARAMS, parse_size, quality
 
 NYAA_NS = "https://nyaa.si/xmlns/nyaa"
-
-
-def _parse_size(size_str: str) -> int:
-    import re
-    m = re.match(r"([\d.]+)\s*(GiB|MiB|KiB|GB|MB|KB|B)", size_str.strip())
-    if not m:
-        return 0
-    num = float(m.group(1))
-    units = {"GiB": 1 << 30, "MiB": 1 << 20, "KiB": 1 << 10,
-             "GB": 10**9, "MB": 10**6, "KB": 10**3, "B": 1}
-    return int(num * units.get(m.group(2), 1))
 
 
 def search_nyaa(query: str) -> list[dict]:
@@ -52,7 +41,7 @@ def search_nyaa(query: str) -> list[dict]:
         results.append({
             "title": title,
             "size": size_str,
-            "size_bytes": _parse_size(size_str),
+            "size_bytes": parse_size(size_str),
             "seeds": seeds,
             "leeches": leeches,
             "magnet": magnet,
