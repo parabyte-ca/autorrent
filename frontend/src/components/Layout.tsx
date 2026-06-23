@@ -158,8 +158,8 @@ export default function Layout() {
               </button>
             )}
           </div>
-          {!collapsed && (
-            {version && <p className="text-xs text-gray-400 dark:text-gray-600">v{version}</p>}
+          {!collapsed && version && (
+            <p className="text-xs text-gray-400 dark:text-gray-600">v{version}</p>
           )}
         </div>
       </aside>
