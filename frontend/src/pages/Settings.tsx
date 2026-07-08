@@ -31,15 +31,23 @@ function fmtUptime(s: number): string {
 
 // ── Reusable field ────────────────────────────────────────────────────────────
 
-function Field({ label, hint, type = "text", value, onChange, placeholder }: {
+function Field({ label, hint, type = "text", value, onChange, placeholder, autoComplete }: {
   label: string; hint?: string; type?: string;
   value: string; onChange: (v: string) => void; placeholder?: string;
+  autoComplete?: string;
 }) {
   return (
     <div>
       <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{label}</label>
       {hint && <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={FIELD} />
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        autoComplete={autoComplete ?? (type === "password" ? "new-password" : undefined)}
+        className={FIELD}
+      />
     </div>
   );
 }
