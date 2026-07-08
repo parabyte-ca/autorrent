@@ -146,3 +146,4 @@ class DigestTestRequest(BaseModel):
     digest_recipients: str = ""
     plex_url: str = ""
     plex_token: str = ""
+    digest_excluded_libs: str = ""

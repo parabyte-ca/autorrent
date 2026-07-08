@@ -464,8 +464,13 @@ def run_weekly_digest() -> None:
         logger.warning("Weekly digest skipped — SMTP host not configured.")
         return
 
+    excluded_raw = s.get("digest_excluded_libs", "") or ""
+    excluded_libs = frozenset(
+        x.strip().lower() for x in excluded_raw.replace("\n", ",").split(",") if x.strip()
+    )
+
     try:
-        sections = fetch_digest_sections(plex_url, plex_token)
+        sections = fetch_digest_sections(plex_url, plex_token, excluded_libs=excluded_libs)
     except Exception as e:
         logger.error("Digest: failed to fetch Plex data: %s", e)
         return

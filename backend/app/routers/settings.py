@@ -47,6 +47,7 @@ DEFAULTS: dict[str, str] = {
     "digest_recipients":   "",
     "digest_day_of_week":  "mon",
     "digest_hour":         "8",
+    "digest_excluded_libs": "",
     # Security
     "ui_password": "",
 }
@@ -158,8 +159,13 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
     if not smtp_host:
         return {"ok": False, "error": "SMTP host not configured"}
 
+    excluded_raw = body.digest_excluded_libs or ""
+    excluded_libs = frozenset(
+        x.strip().lower() for x in excluded_raw.replace("\n", ",").split(",") if x.strip()
+    )
+
     try:
-        sections = fetch_digest_sections(plex_url, plex_token)
+        sections = fetch_digest_sections(plex_url, plex_token, excluded_libs=excluded_libs)
         now = datetime.now(timezone.utc)
         week_label = f"Test — {now.strftime('%B %d, %Y')}"
         html = render_html(sections, week_label)

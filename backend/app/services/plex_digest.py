@@ -1,5 +1,6 @@
 """Weekly Plex digest: fetch recently-added content and email a summary."""
 
+import base64
 import logging
 import smtplib
 import ssl
@@ -12,13 +13,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Content ratings that are NOT considered mature
 _NON_MATURE_MOVIE = {"G", "PG", "PG-13"}
 _NON_MATURE_TV    = {"TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14"}
 
 
-def _get_library_ids_by_type(plex_url: str, token: str, lib_type: str) -> list[str]:
-    """Return all section IDs from Plex whose type matches lib_type ('movie' or 'show')."""
+def _get_library_ids_by_type(
+    plex_url: str,
+    token: str,
+    lib_type: str,
+    excluded_names: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Return section IDs of the given type, skipping excluded library names (case-insensitive)."""
     url = f"{plex_url.rstrip('/')}/library/sections"
     try:
         resp = httpx.get(url, params={"X-Plex-Token": token}, timeout=10.0)
@@ -27,7 +32,9 @@ def _get_library_ids_by_type(plex_url: str, token: str, lib_type: str) -> list[s
         return [
             d.get("key")
             for d in root.findall(".//Directory")
-            if d.get("type") == lib_type and d.get("key")
+            if d.get("type") == lib_type
+            and d.get("key")
+            and d.get("title", "").lower() not in excluded_names
         ]
     except Exception as e:
         logger.error("Plex library listing failed: %s", e)
@@ -47,7 +54,6 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
     except Exception as e:
         logger.error("Plex recentlyAdded failed (library %s): %s", library_id, e)
         return []
-
     try:
         root = ET.fromstring(resp.text)
     except ET.ParseError as e:
@@ -62,12 +68,15 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
         items.append({
             "title":             elem.get("title", ""),
             "year":              elem.get("year", ""),
-            "summary":           (elem.get("summary") or "").strip()[:240],
+            "summary":           (elem.get("summary") or "").strip()[:300],
             "rating":            elem.get("rating", ""),
             "content_rating":    elem.get("contentRating", ""),
             "genres":            [g.get("tag") for g in elem.findall("Genre") if g.get("tag")],
             "item_type":         elem.get("type", ""),
+            "thumb":             elem.get("thumb", ""),
             "grandparent_title": elem.get("grandparentTitle", ""),
+            "grandparent_key":   elem.get("grandparentKey", ""),
+            "grandparent_thumb": elem.get("grandparentThumb", ""),
             "season_num":        elem.get("parentIndex", ""),
             "episode_num":       elem.get("index", ""),
             "added_at":          added_at,
@@ -75,27 +84,69 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
     return items
 
 
-def fetch_digest_sections(plex_url: str, token: str, days: int = 7) -> dict[str, list]:
-    """Return four content buckets: movies, mature_movies, tv, mature_tv.
+def _fetch_show_summary(plex_url: str, token: str, show_key: str) -> str:
+    """Fetch the summary for a show using its grandparentKey."""
+    if not show_key:
+        return ""
+    url = f"{plex_url.rstrip('/')}{show_key}"
+    try:
+        resp = httpx.get(url, params={"X-Plex-Token": token}, timeout=8.0)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        elem = root.find(".//Directory")
+        if elem is not None:
+            return (elem.get("summary") or "").strip()[:300]
+    except Exception as e:
+        logger.warning("Failed to fetch show summary for %s: %s", show_key, e)
+    return ""
 
-    All Plex movie libraries and show libraries are queried automatically —
-    no manual library selection required.
+
+def _fetch_thumb_b64(plex_url: str, token: str, thumb_path: str) -> str:
+    """Download a Plex thumbnail (80×120) and return as a base64 data URI."""
+    if not thumb_path:
+        return ""
+    url = f"{plex_url.rstrip('/')}/photo/:/transcode"
+    try:
+        resp = httpx.get(
+            url,
+            params={"url": thumb_path, "width": "80", "height": "120",
+                    "minSize": "1", "X-Plex-Token": token},
+            timeout=8.0,
+        )
+        if resp.is_success and resp.content:
+            ct = resp.headers.get("content-type", "image/jpeg")
+            return f"data:{ct};base64,{base64.b64encode(resp.content).decode()}"
+    except Exception as e:
+        logger.warning("Thumbnail fetch failed for %s: %s", thumb_path, e)
+    return ""
+
+
+def fetch_digest_sections(
+    plex_url: str,
+    token: str,
+    days: int = 7,
+    excluded_libs: frozenset[str] = frozenset(),
+) -> dict[str, list]:
+    """Return four content buckets with cover art and summaries.
+
+    All Plex movie and show libraries are queried automatically.
+    Libraries whose names (case-insensitive) appear in excluded_libs are skipped.
     """
     sections: dict[str, list] = {
-        "movies":        [],
-        "mature_movies": [],
-        "tv":            [],
-        "mature_tv":     [],
+        "movies": [], "mature_movies": [], "tv": [], "mature_tv": [],
     }
 
-    for lib_id in _get_library_ids_by_type(plex_url, token, "movie"):
+    # ── Movies ────────────────────────────────────────────────────────────────
+    for lib_id in _get_library_ids_by_type(plex_url, token, "movie", excluded_libs):
         for item in _fetch_recently_added(plex_url, token, lib_id, days):
+            item["thumb_b64"] = _fetch_thumb_b64(plex_url, token, item["thumb"])
             cr = (item["content_rating"] or "").upper().strip()
             bucket = "movies" if cr in _NON_MATURE_MOVIE else "mature_movies"
             sections[bucket].append(item)
 
+    # ── TV shows ──────────────────────────────────────────────────────────────
     shows: dict[str, dict] = {}
-    for lib_id in _get_library_ids_by_type(plex_url, token, "show"):
+    for lib_id in _get_library_ids_by_type(plex_url, token, "show", excluded_libs):
         for ep in _fetch_recently_added(plex_url, token, lib_id, days):
             show_title = ep["grandparent_title"] or ep["title"]
             if show_title not in shows:
@@ -105,6 +156,10 @@ def fetch_digest_sections(plex_url: str, token: str, days: int = 7) -> dict[str,
                     "content_rating": cr,
                     "episodes":       [],
                     "added_at":       ep["added_at"],
+                    "summary":        "",
+                    "grandparent_key":   ep["grandparent_key"],
+                    "grandparent_thumb": ep["grandparent_thumb"],
+                    "thumb_b64":      "",
                 }
             s_num = ep.get("season_num", "")
             e_num = ep.get("episode_num", "")
@@ -116,7 +171,10 @@ def fetch_digest_sections(plex_url: str, token: str, days: int = 7) -> dict[str,
                 except (ValueError, TypeError):
                     pass
 
+    # Fetch show summaries and thumbnails (one call per unique show)
     for show in shows.values():
+        show["summary"]   = _fetch_show_summary(plex_url, token, show["grandparent_key"])
+        show["thumb_b64"] = _fetch_thumb_b64(plex_url, token, show["grandparent_thumb"])
         cr = show["content_rating"]
         bucket = "tv" if cr in _NON_MATURE_TV else "mature_tv"
         sections[bucket].append(show)
@@ -125,10 +183,24 @@ def fetch_digest_sections(plex_url: str, token: str, days: int = 7) -> dict[str,
 
 
 def render_html(sections: dict[str, list], week_label: str) -> str:
-    """Render an inline-CSS HTML email from digest sections."""
+    """Render an inline-CSS HTML email with cover art and summaries."""
 
     def _esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _img(thumb_b64: str) -> str:
+        if not thumb_b64:
+            return (
+                '<td style="width:70px;padding-right:14px;vertical-align:top">'
+                '<div style="width:60px;height:90px;background:#e5e7eb;border-radius:4px"></div>'
+                "</td>"
+            )
+        return (
+            '<td style="width:70px;padding-right:14px;vertical-align:top">'
+            f'<img src="{thumb_b64}" width="60" height="90" '
+            'style="display:block;width:60px;height:90px;object-fit:cover;border-radius:4px" />'
+            "</td>"
+        )
 
     def _movie_cards(items: list) -> str:
         rows = []
@@ -141,33 +213,43 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
             genres  = ", ".join(_esc(g) for g in (m.get("genres") or [])[:3])
             summary = _esc(m.get("summary") or "")
             meta    = " · ".join(p for p in [cr, score, genres] if p)
+            img     = _img(m.get("thumb_b64", ""))
             rows.append(
                 f'<tr><td style="padding:12px 0;border-bottom:1px solid #e5e7eb">'
+                f'<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>'
+                f"{img}"
+                f'<td style="vertical-align:top">'
                 f'<div style="font-size:15px;font-weight:600;color:#111827">'
                 f'{title}{(" (" + year + ")") if year else ""}</div>'
                 + (f'<div style="font-size:12px;color:#6b7280;margin-top:3px">{meta}</div>' if meta else "")
                 + (f'<div style="font-size:13px;color:#374151;margin-top:6px;line-height:1.5">{summary}</div>' if summary else "")
-                + "</td></tr>"
+                + "</td></tr></table></td></tr>"
             )
         return "".join(rows)
 
     def _tv_cards(items: list) -> str:
         rows = []
         for show in items:
-            title  = _esc(show["title"])
-            cr     = _esc(show.get("content_rating") or "")
-            eps    = sorted(set(show.get("episodes", [])))
-            ep_str = ", ".join(eps[:12]) + ("…" if len(eps) > 12 else "")
-            count  = f"{len(eps)} new episode{'s' if len(eps) != 1 else ''}"
+            title   = _esc(show["title"])
+            cr      = _esc(show.get("content_rating") or "")
+            summary = _esc(show.get("summary") or "")
+            eps     = sorted(set(show.get("episodes", [])))
+            ep_str  = ", ".join(eps[:12]) + ("…" if len(eps) > 12 else "")
+            count   = f"{len(eps)} new episode{'s' if len(eps) != 1 else ''}"
+            img     = _img(show.get("thumb_b64", ""))
             rows.append(
                 f'<tr><td style="padding:12px 0;border-bottom:1px solid #e5e7eb">'
+                f'<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr>'
+                f"{img}"
+                f'<td style="vertical-align:top">'
                 f'<div style="font-size:15px;font-weight:600;color:#111827">{title}</div>'
                 f'<div style="font-size:12px;color:#6b7280;margin-top:3px">'
                 + (f"{cr} · " if cr else "")
                 + count
                 + "</div>"
+                + (f'<div style="font-size:13px;color:#374151;margin-top:6px;line-height:1.5">{summary}</div>' if summary else "")
                 + (f'<div style="font-size:12px;color:#9ca3af;margin-top:4px;font-family:monospace">{_esc(ep_str)}</div>' if ep_str else "")
-                + "</td></tr>"
+                + "</td></tr></table></td></tr>"
             )
         return "".join(rows)
 
@@ -183,14 +265,15 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         items = sections.get(key, [])
         if not items:
             continue
-        cards_html = renderer(items)
         body_parts.append(
             f'<tr><td style="padding-top:24px;padding-bottom:4px">'
-            f'<div style="font-size:18px;font-weight:700;color:#1d4ed8;border-bottom:2px solid #1d4ed8;padding-bottom:6px">'
+            f'<div style="font-size:18px;font-weight:700;color:#1d4ed8;'
+            f'border-bottom:2px solid #1d4ed8;padding-bottom:6px">'
             f'{heading} <span style="font-size:13px;font-weight:400;color:#6b7280">({len(items)})</span>'
             f"</div></td></tr>"
-            f'<tr><td><table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">'
-            f"{cards_html}"
+            f'<tr><td><table width="100%" cellpadding="0" cellspacing="0" '
+            f'border="0" style="border-collapse:collapse">'
+            f"{renderer(items)}"
             f"</table></td></tr>"
         )
 
@@ -203,8 +286,6 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
             "</td></tr>"
         )
 
-    sections_html = "".join(body_parts)
-
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n<head>\n'
@@ -212,7 +293,8 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         '<meta name="viewport" content="width=device-width,initial-scale=1">\n'
         "<title>AutoRrent Weekly Digest</title>\n"
         "</head>\n"
-        '<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;background:#f9fafb">\n'
+        '<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'
+        "'Segoe UI',sans-serif;background:#f9fafb\">\n"
         '<table width="100%" cellpadding="0" cellspacing="0" border="0">\n'
         '<tr><td align="center" style="padding:32px 16px">\n'
         '<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%">\n'
@@ -223,8 +305,8 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         "</td></tr>\n"
         '<tr><td style="background:#ffffff;border-radius:0 0 12px 12px;padding:0 28px 24px">'
         '<table width="100%" cellpadding="0" cellspacing="0" border="0">'
-        f"{sections_html}"
-        "</table></td></tr>\n"
+        + "".join(body_parts)
+        + "</table></td></tr>\n"
         '<tr><td style="padding:20px 0;text-align:center;font-size:11px;color:#9ca3af">'
         "Sent by AutoRrent &middot; Manage digest settings in your AutoRrent configuration"
         "</td></tr>\n"
