@@ -212,6 +212,7 @@ export default function Settings() {
         digest_recipients:    settings.digest_recipients ?? "",
         plex_url:             settings.plex_url ?? "",
         plex_token:           settings.plex_token ?? "",
+        digest_excluded_libs: settings.digest_excluded_libs ?? "",
       }));
     } finally { setTestingDigest(false); }
   };
@@ -614,6 +615,17 @@ export default function Settings() {
                   </select>
                 </div>
               </div>
+            </div>
+
+            {/* Excluded libraries */}
+            <div>
+              <Field
+                label="Excluded libraries"
+                value={settings.digest_excluded_libs ?? ""}
+                onChange={(v) => set("digest_excluded_libs", v)}
+                placeholder="bellesa, adult-content"
+                hint="Comma-separated Plex library names to exclude from the digest (case-insensitive)."
+              />
             </div>
 
             {/* Test button */}
