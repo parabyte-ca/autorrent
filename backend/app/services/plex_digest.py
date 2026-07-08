@@ -17,6 +17,11 @@ _NON_MATURE_MOVIE = {"G", "PG", "PG-13"}
 _NON_MATURE_TV    = {"TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14"}
 
 
+def _trunc(text: str, limit: int = 300) -> str:
+    s = (text or "").strip()
+    return s[:limit].rstrip() + "…" if len(s) > limit else s
+
+
 def _get_library_ids_by_type(
     plex_url: str,
     token: str,
@@ -68,7 +73,7 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
         items.append({
             "title":             elem.get("title", ""),
             "year":              elem.get("year", ""),
-            "summary":           (elem.get("summary") or "").strip()[:300],
+            "summary":           _trunc(elem.get("summary")),
             "rating":            elem.get("rating", ""),
             "content_rating":    elem.get("contentRating", ""),
             "genres":            [g.get("tag") for g in elem.findall("Genre") if g.get("tag")],
@@ -95,7 +100,7 @@ def _fetch_show_summary(plex_url: str, token: str, show_key: str) -> str:
         root = ET.fromstring(resp.text)
         elem = root.find(".//Directory")
         if elem is not None:
-            return (elem.get("summary") or "").strip()[:300]
+            return _trunc(elem.get("summary"))
     except Exception as e:
         logger.warning("Failed to fetch show summary for %s: %s", show_key, e)
     return ""
