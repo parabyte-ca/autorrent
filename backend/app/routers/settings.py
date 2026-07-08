@@ -9,7 +9,7 @@ from ..database import get_db
 from ..models import Setting
 from ..schemas import JellyfinTestRequest, PlexTestRequest
 from ..services.qbittorrent import test_connection
-from ..services.scheduler import update_interval
+from ..services.scheduler import reschedule_digest, update_interval
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -37,6 +37,18 @@ DEFAULTS: dict[str, str] = {
     "jellyfin_url": "",
     "jellyfin_api_key": "",
     "jellyfin_library_id": "",
+    # Weekly digest
+    "digest_enabled":      "false",
+    "digest_smtp_host":    "",
+    "digest_smtp_port":    "587",
+    "digest_smtp_user":    "",
+    "digest_smtp_password": "",
+    "digest_from_email":   "",
+    "digest_recipients":   "",
+    "digest_day_of_week":  "mon",
+    "digest_hour":         "8",
+    "digest_movie_lib":    "",
+    "digest_tv_lib":       "",
     # Security
     "ui_password": "",
 }
@@ -78,6 +90,15 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
         except Exception:
             pass
 
+    if "digest_day_of_week" in updates or "digest_hour" in updates:
+        try:
+            loaded = _load_settings(db)
+            day  = str(updates.get("digest_day_of_week") or loaded.get("digest_day_of_week") or "mon")
+            hour = int(updates.get("digest_hour") or loaded.get("digest_hour") or 8)
+            reschedule_digest(day, hour)
+        except Exception:
+            pass
+
     return _load_settings(db)
 
 
@@ -114,6 +135,50 @@ async def test_plex(body: PlexTestRequest):
         return {"ok": False, "error": f"Unexpected response format: {e}"}
     except Exception as e:
         logger.error("Plex test connection error: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/settings/test-digest")
+def test_digest(db: Session = Depends(get_db)):
+    from datetime import datetime, timezone
+    from ..services.plex_digest import fetch_digest_sections, render_html, send_email
+
+    s = _load_settings(db)
+
+    recipients_raw = s.get("digest_recipients", "") or ""
+    recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
+    if not recipients:
+        return {"ok": False, "error": "No recipients configured"}
+
+    plex_url   = s.get("plex_url", "")
+    plex_token = s.get("plex_token", "")
+    if not plex_url or not plex_token:
+        return {"ok": False, "error": "Plex not configured"}
+
+    smtp_host = s.get("digest_smtp_host", "")
+    if not smtp_host:
+        return {"ok": False, "error": "SMTP host not configured"}
+
+    try:
+        sections = fetch_digest_sections(
+            plex_url, plex_token,
+            s.get("digest_movie_lib", "") or "",
+            s.get("digest_tv_lib", "") or "",
+        )
+        now = datetime.now(timezone.utc)
+        week_label = f"Test — {now.strftime('%B %d, %Y')}"
+        html = render_html(sections, week_label)
+        smtp_cfg = {
+            "host":       smtp_host,
+            "port":       s.get("digest_smtp_port", "587"),
+            "user":       s.get("digest_smtp_user", ""),
+            "password":   s.get("digest_smtp_password", ""),
+            "from_email": s.get("digest_from_email", ""),
+        }
+        send_email(smtp_cfg, recipients, html, week_label)
+        return {"ok": True, "message": f"Digest sent to {len(recipients)} recipient(s)"}
+    except Exception as e:
+        logger.error("test-digest failed: %s", e)
         return {"ok": False, "error": str(e)}
 
 

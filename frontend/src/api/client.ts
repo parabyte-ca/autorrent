@@ -279,5 +279,7 @@ export const api = {
       req<PlexTestResult>("/settings/test-plex", { method: "POST", body: JSON.stringify(data) }),
     testJellyfin: (data: { url: string; api_key: string }) =>
       req<JellyfinTestResult>("/settings/test-jellyfin", { method: "POST", body: JSON.stringify(data) }),
+    testDigest: () =>
+      req<{ ok: boolean; message?: string; error?: string }>("/settings/test-digest", { method: "POST" }),
   },
 };

@@ -432,6 +432,65 @@ def _cleanup_completed() -> None:
         db.close()
 
 
+def run_weekly_digest() -> None:
+    """Send the weekly Plex content digest email."""
+    from ..database import SessionLocal
+    from ..models import Setting
+    from .plex_digest import fetch_digest_sections, render_html, send_email
+
+    db = SessionLocal()
+    try:
+        s = {row.key: row.value for row in db.query(Setting).all()}
+    finally:
+        db.close()
+
+    if s.get("digest_enabled", "false").lower() != "true":
+        return
+
+    recipients_raw = s.get("digest_recipients", "") or ""
+    recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
+    if not recipients:
+        logger.info("Weekly digest skipped — no recipients configured.")
+        return
+
+    plex_url   = s.get("plex_url", "")
+    plex_token = s.get("plex_token", "")
+    if not plex_url or not plex_token:
+        logger.warning("Weekly digest skipped — Plex not configured.")
+        return
+
+    smtp_host = s.get("digest_smtp_host", "")
+    if not smtp_host:
+        logger.warning("Weekly digest skipped — SMTP host not configured.")
+        return
+
+    try:
+        sections = fetch_digest_sections(
+            plex_url, plex_token,
+            s.get("digest_movie_lib", "") or "",
+            s.get("digest_tv_lib", "") or "",
+        )
+    except Exception as e:
+        logger.error("Digest: failed to fetch Plex data: %s", e)
+        return
+
+    now = datetime.now(timezone.utc)
+    week_label = f"Week of {now.strftime('%B %d, %Y')}"
+    html = render_html(sections, week_label)
+
+    smtp_cfg = {
+        "host":       smtp_host,
+        "port":       s.get("digest_smtp_port", "587"),
+        "user":       s.get("digest_smtp_user", ""),
+        "password":   s.get("digest_smtp_password", ""),
+        "from_email": s.get("digest_from_email", ""),
+    }
+    try:
+        send_email(smtp_cfg, recipients, html, week_label)
+    except Exception as e:
+        logger.error("Digest send failed: %s", e)
+
+
 def _get_interval() -> int:
     from ..database import SessionLocal
     from ..models import Setting
@@ -442,6 +501,22 @@ def _get_interval() -> int:
         return int(s.value) if s and s.value else 60
     except Exception:
         return 60
+    finally:
+        db.close()
+
+
+def _get_digest_schedule() -> tuple[str, int]:
+    from ..database import SessionLocal
+    from ..models import Setting
+
+    db = SessionLocal()
+    try:
+        settings = {s.key: s.value for s in db.query(Setting).all()}
+        day  = settings.get("digest_day_of_week") or "mon"
+        hour = int(settings.get("digest_hour") or 8)
+        return day, hour
+    except Exception:
+        return "mon", 8
     finally:
         db.close()
 
@@ -458,6 +533,13 @@ def start_scheduler() -> None:
         check_show_statuses,
         trigger=CronTrigger(day_of_week="sun", hour=3, minute=0, timezone="UTC"),
         id="show_status_check",
+        replace_existing=True,
+    )
+    digest_day, digest_hour = _get_digest_schedule()
+    _scheduler.add_job(
+        run_weekly_digest,
+        trigger=CronTrigger(day_of_week=digest_day, hour=digest_hour, minute=0, timezone="UTC"),
+        id="weekly_digest",
         replace_existing=True,
     )
     _scheduler.start()
@@ -485,3 +567,12 @@ def update_interval(minutes: int) -> None:
             trigger=IntervalTrigger(minutes=minutes),
         )
         logger.info("Scheduler interval updated to %d min", minutes)
+
+
+def reschedule_digest(day: str, hour: int) -> None:
+    if _scheduler.running:
+        _scheduler.reschedule_job(
+            "weekly_digest",
+            trigger=CronTrigger(day_of_week=day, hour=hour, minute=0, timezone="UTC"),
+        )
+        logger.info("Digest schedule updated to %s at %02d:00 UTC", day, hour)
