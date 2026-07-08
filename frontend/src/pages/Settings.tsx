@@ -202,8 +202,16 @@ export default function Settings() {
 
   const handleTestDigest = async () => {
     setTestingDigest(true); setDigestTestResult(null);
-    try { setDigestTestResult(await api.settings.testDigest()); }
-    finally { setTestingDigest(false); }
+    try {
+      setDigestTestResult(await api.settings.testDigest({
+        digest_smtp_host:     settings.digest_smtp_host ?? "",
+        digest_smtp_port:     settings.digest_smtp_port ?? "587",
+        digest_smtp_user:     settings.digest_smtp_user ?? "",
+        digest_smtp_password: settings.digest_smtp_password ?? "",
+        digest_from_email:    settings.digest_from_email ?? "",
+        digest_recipients:    settings.digest_recipients ?? "",
+      }));
+    } finally { setTestingDigest(false); }
   };
 
   const handleExportBackup = async () => {
@@ -600,35 +608,6 @@ export default function Settings() {
                   <select value={settings.digest_hour ?? "8"} onChange={(e) => set("digest_hour", e.target.value)} className={FIELD}>
                     {Array.from({length: 24}, (_, i) => (
                       <option key={i} value={String(i)}>{String(i).padStart(2,"0")}:00 UTC</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Plex libraries */}
-            <div>
-              <h3 className="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-300">Plex Libraries</h3>
-              <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-                Select which Plex library to pull each content type from. Mature vs. non-mature is split automatically by content rating (R/TV-MA = mature).
-                {plexLibraries.length === 0 && " Click \"Test connection\" in the Plex section above to load your available libraries."}
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Movies library</label>
-                  <select value={settings.digest_movie_lib ?? ""} onChange={(e) => set("digest_movie_lib", e.target.value)} className={FIELD}>
-                    <option value="">— None —</option>
-                    {plexLibraries.map((lib) => (
-                      <option key={lib.key} value={lib.key}>{lib.title} ({lib.type})</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">TV library</label>
-                  <select value={settings.digest_tv_lib ?? ""} onChange={(e) => set("digest_tv_lib", e.target.value)} className={FIELD}>
-                    <option value="">— None —</option>
-                    {plexLibraries.map((lib) => (
-                      <option key={lib.key} value={lib.key}>{lib.title} ({lib.type})</option>
                     ))}
                   </select>
                 </div>

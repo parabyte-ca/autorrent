@@ -17,6 +17,23 @@ _NON_MATURE_MOVIE = {"G", "PG", "PG-13"}
 _NON_MATURE_TV    = {"TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14"}
 
 
+def _get_library_ids_by_type(plex_url: str, token: str, lib_type: str) -> list[str]:
+    """Return all section IDs from Plex whose type matches lib_type ('movie' or 'show')."""
+    url = f"{plex_url.rstrip('/')}/library/sections"
+    try:
+        resp = httpx.get(url, params={"X-Plex-Token": token}, timeout=10.0)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        return [
+            d.get("key")
+            for d in root.findall(".//Directory")
+            if d.get("type") == lib_type and d.get("key")
+        ]
+    except Exception as e:
+        logger.error("Plex library listing failed: %s", e)
+        return []
+
+
 def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int = 7) -> list[dict]:
     cutoff = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
     url = f"{plex_url.rstrip('/')}/library/sections/{library_id}/recentlyAdded"
@@ -58,14 +75,12 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
     return items
 
 
-def fetch_digest_sections(
-    plex_url: str,
-    token: str,
-    movie_lib_id: str,
-    tv_lib_id: str,
-    days: int = 7,
-) -> dict[str, list]:
-    """Return four content buckets: movies, mature_movies, tv, mature_tv."""
+def fetch_digest_sections(plex_url: str, token: str, days: int = 7) -> dict[str, list]:
+    """Return four content buckets: movies, mature_movies, tv, mature_tv.
+
+    All Plex movie libraries and show libraries are queried automatically —
+    no manual library selection required.
+    """
     sections: dict[str, list] = {
         "movies":        [],
         "mature_movies": [],
@@ -73,16 +88,15 @@ def fetch_digest_sections(
         "mature_tv":     [],
     }
 
-    if movie_lib_id:
-        for item in _fetch_recently_added(plex_url, token, movie_lib_id, days):
+    for lib_id in _get_library_ids_by_type(plex_url, token, "movie"):
+        for item in _fetch_recently_added(plex_url, token, lib_id, days):
             cr = (item["content_rating"] or "").upper().strip()
             bucket = "movies" if cr in _NON_MATURE_MOVIE else "mature_movies"
             sections[bucket].append(item)
 
-    if tv_lib_id:
-        raw_episodes = _fetch_recently_added(plex_url, token, tv_lib_id, days)
-        shows: dict[str, dict] = {}
-        for ep in raw_episodes:
+    shows: dict[str, dict] = {}
+    for lib_id in _get_library_ids_by_type(plex_url, token, "show"):
+        for ep in _fetch_recently_added(plex_url, token, lib_id, days):
             show_title = ep["grandparent_title"] or ep["title"]
             if show_title not in shows:
                 cr = (ep["content_rating"] or "").upper().strip()
@@ -102,10 +116,10 @@ def fetch_digest_sections(
                 except (ValueError, TypeError):
                     pass
 
-        for show in shows.values():
-            cr = show["content_rating"]
-            bucket = "tv" if cr in _NON_MATURE_TV else "mature_tv"
-            sections[bucket].append(show)
+    for show in shows.values():
+        cr = show["content_rating"]
+        bucket = "tv" if cr in _NON_MATURE_TV else "mature_tv"
+        sections[bucket].append(show)
 
     return sections
 

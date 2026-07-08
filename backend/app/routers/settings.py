@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Setting
-from ..schemas import JellyfinTestRequest, PlexTestRequest
+from ..schemas import DigestTestRequest, JellyfinTestRequest, PlexTestRequest
 from ..services.qbittorrent import test_connection
 from ..services.scheduler import reschedule_digest, update_interval
 
@@ -47,8 +47,6 @@ DEFAULTS: dict[str, str] = {
     "digest_recipients":   "",
     "digest_day_of_week":  "mon",
     "digest_hour":         "8",
-    "digest_movie_lib":    "",
-    "digest_tv_lib":       "",
     # Security
     "ui_password": "",
 }
@@ -139,13 +137,14 @@ async def test_plex(body: PlexTestRequest):
 
 
 @router.post("/settings/test-digest")
-def test_digest(db: Session = Depends(get_db)):
+def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
     from datetime import datetime, timezone
     from ..services.plex_digest import fetch_digest_sections, render_html, send_email
 
     s = _load_settings(db)
 
-    recipients_raw = s.get("digest_recipients", "") or ""
+    # Recipients come from the request body (current form state, not necessarily saved yet)
+    recipients_raw = body.digest_recipients or ""
     recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
     if not recipients:
         return {"ok": False, "error": "No recipients configured"}
@@ -153,27 +152,23 @@ def test_digest(db: Session = Depends(get_db)):
     plex_url   = s.get("plex_url", "")
     plex_token = s.get("plex_token", "")
     if not plex_url or not plex_token:
-        return {"ok": False, "error": "Plex not configured"}
+        return {"ok": False, "error": "Plex not configured (save Plex settings first)"}
 
-    smtp_host = s.get("digest_smtp_host", "")
+    smtp_host = body.digest_smtp_host
     if not smtp_host:
         return {"ok": False, "error": "SMTP host not configured"}
 
     try:
-        sections = fetch_digest_sections(
-            plex_url, plex_token,
-            s.get("digest_movie_lib", "") or "",
-            s.get("digest_tv_lib", "") or "",
-        )
+        sections = fetch_digest_sections(plex_url, plex_token)
         now = datetime.now(timezone.utc)
         week_label = f"Test — {now.strftime('%B %d, %Y')}"
         html = render_html(sections, week_label)
         smtp_cfg = {
             "host":       smtp_host,
-            "port":       s.get("digest_smtp_port", "587"),
-            "user":       s.get("digest_smtp_user", ""),
-            "password":   s.get("digest_smtp_password", ""),
-            "from_email": s.get("digest_from_email", ""),
+            "port":       body.digest_smtp_port or "587",
+            "user":       body.digest_smtp_user,
+            "password":   body.digest_smtp_password,
+            "from_email": body.digest_from_email,
         }
         send_email(smtp_cfg, recipients, html, week_label)
         return {"ok": True, "message": f"Digest sent to {len(recipients)} recipient(s)"}
