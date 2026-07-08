@@ -210,6 +210,8 @@ export default function Settings() {
         digest_smtp_password: settings.digest_smtp_password ?? "",
         digest_from_email:    settings.digest_from_email ?? "",
         digest_recipients:    settings.digest_recipients ?? "",
+        plex_url:             settings.plex_url ?? "",
+        plex_token:           settings.plex_token ?? "",
       }));
     } finally { setTestingDigest(false); }
   };

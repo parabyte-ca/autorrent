@@ -144,3 +144,5 @@ class DigestTestRequest(BaseModel):
     digest_smtp_password: str = ""
     digest_from_email: str = ""
     digest_recipients: str = ""
+    plex_url: str = ""
+    plex_token: str = ""
