@@ -149,10 +149,10 @@ def test_digest(body: DigestTestRequest, db: Session = Depends(get_db)):
     if not recipients:
         return {"ok": False, "error": "No recipients configured"}
 
-    plex_url   = s.get("plex_url", "")
-    plex_token = s.get("plex_token", "")
+    plex_url   = body.plex_url or s.get("plex_url", "")
+    plex_token = body.plex_token or s.get("plex_token", "")
     if not plex_url or not plex_token:
-        return {"ok": False, "error": "Plex not configured (save Plex settings first)"}
+        return {"ok": False, "error": "Plex URL and token are required — fill in the Plex section above"}
 
     smtp_host = body.digest_smtp_host
     if not smtp_host:

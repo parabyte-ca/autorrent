@@ -282,6 +282,7 @@ export const api = {
     testDigest: (data: {
       digest_smtp_host: string; digest_smtp_port: string; digest_smtp_user: string;
       digest_smtp_password: string; digest_from_email: string; digest_recipients: string;
+      plex_url: string; plex_token: string;
     }) =>
       req<{ ok: boolean; message?: string; error?: string }>("/settings/test-digest", { method: "POST", body: JSON.stringify(data) }),
   },
