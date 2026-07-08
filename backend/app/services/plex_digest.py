@@ -17,9 +17,20 @@ _NON_MATURE_MOVIE = {"G", "PG", "PG-13"}
 _NON_MATURE_TV    = {"TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14"}
 
 
-def _trunc(text: str, limit: int = 300) -> str:
-    s = (text or "").strip()
-    return s[:limit].rstrip() + "…" if len(s) > limit else s
+def _fetch_machine_identifier(plex_url: str, token: str) -> str:
+    """Return the Plex server machineIdentifier used for building deep links."""
+    try:
+        resp = httpx.get(
+            plex_url.rstrip("/") + "/",
+            params={"X-Plex-Token": token},
+            timeout=8.0,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+        return root.get("machineIdentifier", "")
+    except Exception as e:
+        logger.warning("Plex machine identifier fetch failed: %s", e)
+    return ""
 
 
 def _get_library_ids_by_type(
@@ -73,12 +84,13 @@ def _fetch_recently_added(plex_url: str, token: str, library_id: str, days: int 
         items.append({
             "title":             elem.get("title", ""),
             "year":              elem.get("year", ""),
-            "summary":           _trunc(elem.get("summary")),
+            "summary":           (elem.get("summary") or "").strip(),
             "rating":            elem.get("rating", ""),
             "content_rating":    elem.get("contentRating", ""),
             "genres":            [g.get("tag") for g in elem.findall("Genre") if g.get("tag")],
             "item_type":         elem.get("type", ""),
             "thumb":             elem.get("thumb", ""),
+            "rating_key":        elem.get("ratingKey", ""),
             "grandparent_title": elem.get("grandparentTitle", ""),
             "grandparent_key":   elem.get("grandparentKey", ""),
             "grandparent_thumb": elem.get("grandparentThumb", ""),
@@ -100,7 +112,7 @@ def _fetch_show_summary(plex_url: str, token: str, show_key: str) -> str:
         root = ET.fromstring(resp.text)
         elem = root.find(".//Directory")
         if elem is not None:
-            return _trunc(elem.get("summary"))
+            return (elem.get("summary") or "").strip()
     except Exception as e:
         logger.warning("Failed to fetch show summary for %s: %s", show_key, e)
     return ""
@@ -141,10 +153,21 @@ def fetch_digest_sections(
         "movies": [], "mature_movies": [], "tv": [], "mature_tv": [],
     }
 
+    machine_id = _fetch_machine_identifier(plex_url, token)
+
+    def _plex_link(rating_key: str) -> str:
+        if not machine_id or not rating_key:
+            return ""
+        return (
+            f"https://app.plex.tv/desktop/#!/server/{machine_id}"
+            f"/details?key=%2Flibrary%2Fmetadata%2F{rating_key}"
+        )
+
     # ── Movies ────────────────────────────────────────────────────────────────
     for lib_id in _get_library_ids_by_type(plex_url, token, "movie", excluded_libs):
         for item in _fetch_recently_added(plex_url, token, lib_id, days):
             item["thumb_b64"] = _fetch_thumb_b64(plex_url, token, item["thumb"])
+            item["plex_link"] = _plex_link(item.get("rating_key", ""))
             cr = (item["content_rating"] or "").upper().strip()
             bucket = "movies" if cr in _NON_MATURE_MOVIE else "mature_movies"
             sections[bucket].append(item)
@@ -156,13 +179,16 @@ def fetch_digest_sections(
             show_title = ep["grandparent_title"] or ep["title"]
             if show_title not in shows:
                 cr = (ep["content_rating"] or "").upper().strip()
+                gp_key = ep["grandparent_key"]  # "/library/metadata/{id}"
+                gp_rating_key = gp_key.rsplit("/", 1)[-1] if gp_key else ""
                 shows[show_title] = {
                     "title":          show_title,
                     "content_rating": cr,
                     "episodes":       [],
                     "added_at":       ep["added_at"],
                     "summary":        "",
-                    "grandparent_key":   ep["grandparent_key"],
+                    "plex_link":      _plex_link(gp_rating_key),
+                    "grandparent_key":   gp_key,
                     "grandparent_thumb": ep["grandparent_thumb"],
                     "thumb_b64":      "",
                 }
@@ -193,6 +219,21 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
     def _esc(s: str) -> str:
         return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    def _summary(text: str, link: str = "", limit: int = 300) -> str:
+        """Return escaped summary HTML, with a linked ellipsis if the text exceeds limit."""
+        s = (text or "").strip()
+        if not s:
+            return ""
+        if len(s) <= limit:
+            return _esc(s)
+        clipped = _esc(s[:limit].rstrip())
+        if link:
+            return (
+                clipped
+                + f'<a href="{link}" style="color:#9ca3af;text-decoration:none" target="_blank">…</a>'
+            )
+        return clipped + "…"
+
     def _img(thumb_b64: str) -> str:
         if not thumb_b64:
             return (
@@ -216,7 +257,7 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
             rating  = m.get("rating", "")
             score   = f"{float(rating):.1f}/10" if rating else ""
             genres  = ", ".join(_esc(g) for g in (m.get("genres") or [])[:3])
-            summary = _esc(m.get("summary") or "")
+            summary = _summary(m.get("summary") or "", m.get("plex_link") or "")
             meta    = " · ".join(p for p in [cr, score, genres] if p)
             img     = _img(m.get("thumb_b64", ""))
             rows.append(
@@ -237,7 +278,7 @@ def render_html(sections: dict[str, list], week_label: str) -> str:
         for show in items:
             title   = _esc(show["title"])
             cr      = _esc(show.get("content_rating") or "")
-            summary = _esc(show.get("summary") or "")
+            summary = _summary(show.get("summary") or "", show.get("plex_link") or "")
             eps     = sorted(set(show.get("episodes", [])))
             ep_str  = ", ".join(eps[:12]) + ("…" if len(eps) > 12 else "")
             count   = f"{len(eps)} new episode{'s' if len(eps) != 1 else ''}"
