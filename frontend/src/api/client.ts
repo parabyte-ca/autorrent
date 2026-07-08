@@ -279,7 +279,10 @@ export const api = {
       req<PlexTestResult>("/settings/test-plex", { method: "POST", body: JSON.stringify(data) }),
     testJellyfin: (data: { url: string; api_key: string }) =>
       req<JellyfinTestResult>("/settings/test-jellyfin", { method: "POST", body: JSON.stringify(data) }),
-    testDigest: () =>
-      req<{ ok: boolean; message?: string; error?: string }>("/settings/test-digest", { method: "POST" }),
+    testDigest: (data: {
+      digest_smtp_host: string; digest_smtp_port: string; digest_smtp_user: string;
+      digest_smtp_password: string; digest_from_email: string; digest_recipients: string;
+    }) =>
+      req<{ ok: boolean; message?: string; error?: string }>("/settings/test-digest", { method: "POST", body: JSON.stringify(data) }),
   },
 };

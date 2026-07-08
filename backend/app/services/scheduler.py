@@ -465,11 +465,7 @@ def run_weekly_digest() -> None:
         return
 
     try:
-        sections = fetch_digest_sections(
-            plex_url, plex_token,
-            s.get("digest_movie_lib", "") or "",
-            s.get("digest_tv_lib", "") or "",
-        )
+        sections = fetch_digest_sections(plex_url, plex_token)
     except Exception as e:
         logger.error("Digest: failed to fetch Plex data: %s", e)
         return

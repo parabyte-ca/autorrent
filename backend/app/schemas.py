@@ -135,3 +135,12 @@ class PlexTestRequest(BaseModel):
 class JellyfinTestRequest(BaseModel):
     url: str
     api_key: str
+
+
+class DigestTestRequest(BaseModel):
+    digest_smtp_host: str = ""
+    digest_smtp_port: str = "587"
+    digest_smtp_user: str = ""
+    digest_smtp_password: str = ""
+    digest_from_email: str = ""
+    digest_recipients: str = ""
