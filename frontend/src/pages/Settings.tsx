@@ -118,6 +118,8 @@ export default function Settings() {
   const [testingPlex,      setTestingPlex]      = useState(false);
   const [jellyfinTestResult, setJellyfinTestResult] = useState<JellyfinTestResult | null>(null);
   const [testingJellyfin,  setTestingJellyfin]  = useState(false);
+  const [testingDigest,    setTestingDigest]    = useState(false);
+  const [digestTestResult, setDigestTestResult] = useState<{ ok: boolean; message?: string; error?: string } | null>(null);
   const [health,           setHealth]           = useState<HealthStatus>(null);
   const [exportingBackup,  setExportingBackup]  = useState(false);
   const [exportError,      setExportError]      = useState<string | null>(null);
@@ -196,6 +198,12 @@ export default function Settings() {
       });
       setJellyfinTestResult(result);
     } finally { setTestingJellyfin(false); }
+  };
+
+  const handleTestDigest = async () => {
+    setTestingDigest(true); setDigestTestResult(null);
+    try { setDigestTestResult(await api.settings.testDigest()); }
+    finally { setTestingDigest(false); }
   };
 
   const handleExportBackup = async () => {
@@ -522,6 +530,129 @@ export default function Settings() {
             — supports Telegram, Discord, Slack, email, Pushover, and 60+ more. Leave blank to disable.
           </p>
           <Field label="Apprise URL" value={settings.apprise_url ?? ""} onChange={(v) => set("apprise_url", v)} placeholder="tgram://bottoken/ChatID" />
+        </Section>
+
+        {/* Weekly Digest */}
+        <Section title="Weekly Digest Email">
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            Send a weekly email listing new Movies and TV Shows added to Plex, split into regular and mature sections by content rating.
+          </p>
+          <div className="mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={settings.digest_enabled === "true"}
+                onChange={(e) => set("digest_enabled", e.target.checked ? "true" : "false")}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Enable weekly digest</span>
+            </label>
+          </div>
+
+          <div className={`space-y-4 ${settings.digest_enabled !== "true" ? "opacity-50 pointer-events-none" : ""}`}>
+            {/* SMTP */}
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">SMTP Configuration</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="SMTP Host" value={settings.digest_smtp_host ?? ""} onChange={(v) => set("digest_smtp_host", v)} placeholder="smtp.gmail.com" />
+                <Field label="Port" value={settings.digest_smtp_port ?? "587"} onChange={(v) => set("digest_smtp_port", v)} placeholder="587" />
+                <Field label="Username" value={settings.digest_smtp_user ?? ""} onChange={(v) => set("digest_smtp_user", v)} placeholder="you@gmail.com" />
+                <Field label="Password" type="password" value={settings.digest_smtp_password ?? ""} onChange={(v) => set("digest_smtp_password", v)} placeholder="••••••••" />
+                <div className="sm:col-span-2">
+                  <Field
+                    label="From address"
+                    value={settings.digest_from_email ?? ""}
+                    onChange={(v) => set("digest_from_email", v)}
+                    placeholder="AutoRrent <you@gmail.com>"
+                    hint="Defaults to the username above if left blank."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Recipients */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Recipients</label>
+              <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">One email address per line, or comma-separated.</p>
+              <textarea
+                rows={3}
+                value={settings.digest_recipients ?? ""}
+                onChange={(e) => set("digest_recipients", e.target.value)}
+                placeholder={"alice@example.com\nbob@example.com"}
+                className={`${FIELD} resize-y`}
+              />
+            </div>
+
+            {/* Schedule */}
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">Schedule (UTC)</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Day of week</label>
+                  <select value={settings.digest_day_of_week ?? "mon"} onChange={(e) => set("digest_day_of_week", e.target.value)} className={FIELD}>
+                    {([["mon","Monday"],["tue","Tuesday"],["wed","Wednesday"],["thu","Thursday"],["fri","Friday"],["sat","Saturday"],["sun","Sunday"]] as [string,string][]).map(([v,l]) => (
+                      <option key={v} value={v}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Hour (UTC)</label>
+                  <select value={settings.digest_hour ?? "8"} onChange={(e) => set("digest_hour", e.target.value)} className={FIELD}>
+                    {Array.from({length: 24}, (_, i) => (
+                      <option key={i} value={String(i)}>{String(i).padStart(2,"0")}:00 UTC</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Plex libraries */}
+            <div>
+              <h3 className="mb-1 text-sm font-semibold text-gray-700 dark:text-gray-300">Plex Libraries</h3>
+              <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+                Select which Plex library to pull each content type from. Mature vs. non-mature is split automatically by content rating (R/TV-MA = mature).
+                {plexLibraries.length === 0 && " Click \"Test connection\" in the Plex section above to load your available libraries."}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Movies library</label>
+                  <select value={settings.digest_movie_lib ?? ""} onChange={(e) => set("digest_movie_lib", e.target.value)} className={FIELD}>
+                    <option value="">— None —</option>
+                    {plexLibraries.map((lib) => (
+                      <option key={lib.key} value={lib.key}>{lib.title} ({lib.type})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">TV library</label>
+                  <select value={settings.digest_tv_lib ?? ""} onChange={(e) => set("digest_tv_lib", e.target.value)} className={FIELD}>
+                    <option value="">— None —</option>
+                    {plexLibraries.map((lib) => (
+                      <option key={lib.key} value={lib.key}>{lib.title} ({lib.type})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Test button */}
+            <div className="flex items-center gap-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+              <button
+                onClick={handleTestDigest}
+                disabled={testingDigest}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                {testingDigest && <Loader2 className="h-4 w-4 animate-spin" />}
+                Send test digest now
+              </button>
+              {digestTestResult && (
+                <span className={`flex items-center gap-1.5 text-sm font-medium ${digestTestResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {digestTestResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                  {digestTestResult.ok ? digestTestResult.message : digestTestResult.error}
+                </span>
+              )}
+            </div>
+          </div>
         </Section>
 
         {/* Data management */}
