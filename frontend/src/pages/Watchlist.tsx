@@ -65,8 +65,8 @@ function FormModal({ initial, paths, onClose, onSave }: {
   const defaultPath = paths.find((p) => p.is_default);
   const [form, setForm] = useState<WatchlistCreate>(
     initial
-      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled }
-      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true }
+      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false }
+      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false }
   );
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.title.trim() && form.search_query.trim();
@@ -121,6 +121,53 @@ function FormModal({ initial, paths, onClose, onSave }: {
               </select>
             </div>
           )}
+
+          {/* Advanced options */}
+          <details className="group">
+            <summary className="cursor-pointer select-none text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 list-none flex items-center gap-1">
+              <span className="group-open:rotate-90 transition-transform inline-block">›</span>
+              Advanced options
+            </summary>
+            <div className="mt-3 space-y-3 pl-3 border-l-2 border-gray-100 dark:border-gray-800">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Max size (MB) <span className="text-xs font-normal text-gray-400">optional</span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.max_size_mb ?? ""}
+                  onChange={(e) => set("max_size_mb", e.target.value ? Number(e.target.value) : null)}
+                  placeholder="e.g. 2000"
+                  className={FIELD}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Preferred release groups <span className="text-xs font-normal text-gray-400">comma-separated, in priority order</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.preferred_groups ?? ""}
+                  onChange={(e) => set("preferred_groups", e.target.value || null)}
+                  placeholder="e.g. YIFY, NTb, SPARKS"
+                  className={FIELD}
+                />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={form.prefer_season_packs ?? false}
+                  onChange={(e) => set("prefer_season_packs", e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Prefer season packs</span>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">Download a full season pack when available instead of individual episodes</p>
+                </div>
+              </label>
+            </div>
+          </details>
         </div>
         <div className="mt-5 flex gap-3">
           <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -295,7 +342,12 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
           <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{item.quality}</strong></span>
           <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{item.codec ?? "x265"}</strong></span>
           <span>Save to: <strong className="text-gray-700 dark:text-gray-300">{pathName(item.download_path_id)}</strong></span>
+          {item.max_size_mb && <span>Max: <strong className="text-gray-700 dark:text-gray-300">{item.max_size_mb >= 1024 ? `${(item.max_size_mb / 1024).toFixed(1)} GB` : `${item.max_size_mb} MB`}</strong></span>}
+          {item.prefer_season_packs && <span className="text-blue-600 dark:text-blue-400 font-medium">Season packs</span>}
         </div>
+        {item.preferred_groups && (
+          <div>Groups: <strong className="text-gray-700 dark:text-gray-300">{item.preferred_groups}</strong></div>
+        )}
         <div className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
           Checked: {fmtDate(item.last_checked ?? undefined)}

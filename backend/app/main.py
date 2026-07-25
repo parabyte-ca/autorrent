@@ -34,6 +34,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE watchlist ADD COLUMN show_status_override INTEGER DEFAULT 0",
             "ALTER TABLE downloads ADD COLUMN completion_first_seen_at DATETIME",
             "ALTER TABLE downloads ADD COLUMN qbit_removed INTEGER DEFAULT 0",
+            "ALTER TABLE watchlist ADD COLUMN max_size_mb INTEGER",
+            "ALTER TABLE watchlist ADD COLUMN preferred_groups TEXT",
+            "ALTER TABLE watchlist ADD COLUMN prefer_season_packs INTEGER DEFAULT 0",
         ]:
             try:
                 conn.execute(text(stmt))

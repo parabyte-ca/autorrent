@@ -91,11 +91,64 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                         if query_words & set(re.sub(r"[^a-z0-9]", " ", r["title"].lower()).split())
                     ]
 
+                # Apply per-item size cap.
+                if item.max_size_mb:
+                    max_bytes = item.max_size_mb * 1024 * 1024
+                    results = [r for r in results if r.get("size_bytes", 0) <= max_bytes]
+
+                # Season pack: if enabled, also search for a full-season torrent
+                # and prefer it over a single episode when one is found.
+                use_pack = False
+                if item.prefer_season_packs:
+                    pack_query = f"{item.search_query} S{item.season:02d}"
+                    pack_results = search_all(
+                        pack_query,
+                        quality=item.quality,
+                        codec=item.codec or "x265",
+                        filter_adult=True,
+                    )
+                    pack_results = [r for r in pack_results if r["seeds"] >= min_seeds]
+                    # Must NOT have an episode number — we want packs, not single eps.
+                    _ep_pattern = re.compile(r"[Ss]\d+[Ee]\d+")
+                    pack_results = [r for r in pack_results if not _ep_pattern.search(r["title"])]
+                    if query_words:
+                        pack_results = [
+                            r for r in pack_results
+                            if query_words & set(re.sub(r"[^a-z0-9]", " ", r["title"].lower()).split())
+                        ]
+                    if item.max_size_mb:
+                        max_bytes = item.max_size_mb * 1024 * 1024
+                        pack_results = [r for r in pack_results if r.get("size_bytes", 0) <= max_bytes]
+                    if pack_results:
+                        best_pack = max(pack_results, key=lambda r: r["seeds"])
+                        results = [best_pack]
+                        use_pack = True
+                        logger.info(
+                            "Season pack preferred for '%s' S%02d: %s",
+                            item.title, item.season, best_pack["title"],
+                        )
+
                 if not results:
                     logger.debug("No results for: %s", query)
                     continue
 
-                best = max(results, key=lambda r: r["seeds"])
+                # Rank by preferred release groups first, then by seeds.
+                preferred = [
+                    g.strip().lower()
+                    for g in (item.preferred_groups or "").split(",")
+                    if g.strip()
+                ]
+                if preferred:
+                    def _group_score(r: dict) -> int:
+                        t = r["title"].lower()
+                        for rank, grp in enumerate(preferred):
+                            if grp in t:
+                                return len(preferred) - rank
+                        return 0
+                    results.sort(key=lambda r: (_group_score(r), r["seeds"]), reverse=True)
+                    best = results[0]
+                else:
+                    best = max(results, key=lambda r: r["seeds"])
 
                 # Secondary guard: skip if a Download record already tracks this episode
                 # (handles the case where the episode is actively downloading).
@@ -153,7 +206,12 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                 )
                 db.add(dl)
 
-                item.episode += 1
+                if use_pack:
+                    # Season pack downloaded — skip to episode 99 so the scanner
+                    # doesn't try to download individual episodes for this season.
+                    item.episode = 99
+                else:
+                    item.episode += 1
                 item.last_found = datetime.now(timezone.utc)
                 db.commit()
 

@@ -50,6 +50,9 @@ class WatchlistCreate(BaseModel):
     episode: int = 1
     download_path_id: Optional[int] = None
     enabled: bool = True
+    max_size_mb: Optional[int] = None
+    preferred_groups: Optional[str] = None
+    prefer_season_packs: bool = False
 
 
 class WatchlistUpdate(BaseModel):
@@ -61,6 +64,9 @@ class WatchlistUpdate(BaseModel):
     episode: Optional[int] = None
     download_path_id: Optional[int] = None
     enabled: Optional[bool] = None
+    max_size_mb: Optional[int] = None
+    preferred_groups: Optional[str] = None
+    prefer_season_packs: Optional[bool] = None
 
 
 class WatchlistOut(BaseModel):
@@ -80,6 +86,9 @@ class WatchlistOut(BaseModel):
     show_status_checked_at: Optional[datetime] = None
     tvmaze_id: Optional[int] = None
     show_status_override: bool = False
+    max_size_mb: Optional[int] = None
+    preferred_groups: Optional[str] = None
+    prefer_season_packs: bool = False
 
     model_config = {"from_attributes": True}
 
