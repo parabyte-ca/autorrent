@@ -27,6 +27,13 @@ import { fmtAgo, fmtDate } from "../utils";
 const QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
 
+function fmtFree(bytes?: number | null): string | null {
+  if (bytes == null) return null;
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(1)} TB free`;
+  if (bytes >= 1e9)  return `${(bytes / 1e9).toFixed(1)} GB free`;
+  return `${(bytes / 1e6).toFixed(0)} MB free`;
+}
+
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
   "focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -117,7 +124,10 @@ function FormModal({ initial, paths, onClose, onSave }: {
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Save to</label>
               <select value={form.download_path_id ?? ""} onChange={(e) => set("download_path_id", e.target.value ? Number(e.target.value) : undefined)} className={FIELD}>
                 <option value="">Use default</option>
-                {paths.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {paths.map((p) => {
+                  const free = fmtFree(p.free_bytes);
+                  return <option key={p.id} value={p.id}>{p.name}{free ? ` (${free})` : ""}</option>;
+                })}
               </select>
             </div>
           )}

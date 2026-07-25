@@ -35,6 +35,8 @@ class DownloadPathOut(BaseModel):
     name: str
     path: str
     is_default: bool
+    free_bytes: Optional[int] = None
+    total_bytes: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

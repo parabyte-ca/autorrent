@@ -1,3 +1,4 @@
+import shutil
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -8,9 +9,28 @@ from ..schemas import DownloadPathCreate, DownloadPathOut, DownloadPathUpdate
 router = APIRouter()
 
 
+def _with_disk_usage(dp: DownloadPath) -> dict:
+    """Return a dict suitable for DownloadPathOut, with disk-usage fields populated."""
+    out = {
+        "id": dp.id,
+        "name": dp.name,
+        "path": dp.path,
+        "is_default": dp.is_default,
+        "free_bytes": None,
+        "total_bytes": None,
+    }
+    try:
+        usage = shutil.disk_usage(dp.path)
+        out["free_bytes"] = usage.free
+        out["total_bytes"] = usage.total
+    except Exception:
+        pass
+    return out
+
+
 @router.get("/paths", response_model=list[DownloadPathOut])
 def get_paths(db: Session = Depends(get_db)):
-    return db.query(DownloadPath).all()
+    return [_with_disk_usage(dp) for dp in db.query(DownloadPath).all()]
 
 
 @router.post("/paths", response_model=DownloadPathOut, status_code=201)
@@ -21,7 +41,7 @@ def create_path(path: DownloadPathCreate, db: Session = Depends(get_db)):
     db.add(db_path)
     db.commit()
     db.refresh(db_path)
-    return db_path
+    return _with_disk_usage(db_path)
 
 
 @router.put("/paths/{path_id}", response_model=DownloadPathOut)
@@ -36,7 +56,7 @@ def update_path(path_id: int, path: DownloadPathUpdate, db: Session = Depends(ge
         setattr(db_path, field, value)
     db.commit()
     db.refresh(db_path)
-    return db_path
+    return _with_disk_usage(db_path)
 
 
 @router.delete("/paths/{path_id}")

@@ -107,6 +107,8 @@ export interface DownloadPath {
   name: string;
   path: string;
   is_default: boolean;
+  free_bytes?: number | null;
+  total_bytes?: number | null;
 }
 
 export type Settings = Record<string, string>;

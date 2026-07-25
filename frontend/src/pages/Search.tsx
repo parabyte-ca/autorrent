@@ -47,6 +47,13 @@ const INPUT = [
   "dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100",
 ].join(" ");
 
+function fmtFree(bytes?: number | null): string | null {
+  if (bytes == null) return null;
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(1)} TB free`;
+  if (bytes >= 1e9)  return `${(bytes / 1e9).toFixed(1)} GB free`;
+  return `${(bytes / 1e6).toFixed(0)} MB free`;
+}
+
 function sourceLabel(src: string) {
   return src.startsWith("jackett/") ? src.replace("jackett/", "") : src.toUpperCase();
 }
@@ -84,9 +91,14 @@ function DownloadModal({
             onChange={(e) => setPathId(e.target.value ? Number(e.target.value) : undefined)}
             className={`mb-4 w-full ${INPUT}`}
           >
-            {paths.map((p) => (
-              <option key={p.id} value={p.id}>{p.name} — {p.path}</option>
-            ))}
+            {paths.map((p) => {
+              const free = fmtFree(p.free_bytes);
+              return (
+                <option key={p.id} value={p.id}>
+                  {p.name} — {p.path}{free ? ` (${free})` : ""}
+                </option>
+              );
+            })}
           </select>
         )}
 
