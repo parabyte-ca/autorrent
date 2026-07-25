@@ -26,12 +26,22 @@ QBITTORRENT_COMPLETE_STATES = {
     "checkingUP",   # integrity check after completion
     "forcedUP",     # force-started seeding
     "pausedUP",     # paused after completion
+    "queuedUP",     # queued to seed (upload queue full) — download IS complete
     "completed",    # explicitly marked complete by qBittorrent
-    "moving",       # being moved to final location — shown as complete in UI,
-                    # but grace-period clock only starts once the move finishes.
+    "moving",       # being moved to final location — grace-period clock starts once done
 }
 
-DOWNLOADING_STATES = {"downloading", "stalledDL", "forcedDL", "checkingDL", "metaDL"}
+DOWNLOADING_STATES = {
+    "downloading",
+    "stalledDL",         # stalled, no peers
+    "forcedDL",          # force-started download
+    "checkingDL",        # integrity check mid-download
+    "metaDL",            # fetching torrent metadata
+    "queuedDL",          # waiting in download queue (0% but not stuck in AutoRrent)
+    "pausedDL",          # paused by user in qBittorrent
+    "allocating",        # allocating disk space before downloading
+    "checkingResumeData", # rechecking on qBittorrent restart
+}
 ERROR_STATES = {"error", "missingFiles"}
 
 # Seconds to wait after first seeing a complete state before removing the
