@@ -290,7 +290,7 @@ def _sync_download_statuses() -> None:
 
     _COMPLETE = {
         "uploading", "stalledUP", "checkingUP", "forcedUP",
-        "pausedUP", "completed", "moving",
+        "pausedUP", "queuedUP", "completed", "moving",
     }
 
     db = SessionLocal()

@@ -93,6 +93,7 @@ export interface Download {
   progress?: number;
   eta?: number;
   dlspeed?: number;
+  is_stale?: boolean;
 }
 
 export interface DownloadPath {

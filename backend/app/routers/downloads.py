@@ -3,6 +3,8 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
+_STALE_THRESHOLD = timedelta(hours=2)
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -119,6 +121,18 @@ def get_downloads(db: Session = Depends(get_db)):
     _settings_cache: dict | None = None
 
     for d in downloads:
+        now = datetime.now(timezone.utc)
+
+        # A torrent is stale if it has been in "downloading" state for more than
+        # _STALE_THRESHOLD with no sign of completion.  We compute this here
+        # (before the qBittorrent status update) so the flag survives even when
+        # qBittorrent is unreachable.
+        is_stale = (
+            d.status == "downloading"
+            and d.created_at is not None
+            and (now - d.created_at.replace(tzinfo=timezone.utc if d.created_at.tzinfo is None else d.created_at.tzinfo)) >= _STALE_THRESHOLD
+        )
+
         item = {
             "id": d.id,
             "title": d.title,
@@ -131,6 +145,7 @@ def get_downloads(db: Session = Depends(get_db)):
             "progress": None,
             "eta": None,
             "dlspeed": None,
+            "is_stale": is_stale,
         }
 
         skip_qbit = (
