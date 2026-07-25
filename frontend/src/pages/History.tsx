@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Download,
+  Layers,
+  List,
   Loader2,
   Search,
   Trash2,
@@ -84,6 +87,8 @@ export default function History() {
   const [clearing,     setClearing]     = useState(false);
   const [refreshKey,   setRefreshKey]   = useState(0);
   const [toast,        setToast]        = useState<string | null>(null);
+  const [grouped,      setGrouped]      = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
   const refresh = () => setRefreshKey((k) => k + 1);
@@ -169,6 +174,55 @@ export default function History() {
     }
   };
 
+  // ── Grouped view helpers ───────────────────────────────────────────────────
+
+  function showTitle(name: string): string {
+    // Strip trailing SxxExx, season/episode number, and year patterns.
+    return name.replace(/\s*[Ss]\d+[Ee]\d+.*/i, "")
+               .replace(/\s*\(\d{4}\).*/,"")
+               .trim() || name;
+  }
+
+  interface HistoryGroup {
+    key: string;
+    count: number;
+    total_bytes: number;
+    completed: number;
+    failed: number;
+    latest: string;   // ISO date
+    items: DownloadHistoryItem[];
+  }
+
+  const groups = useMemo<HistoryGroup[]>(() => {
+    const map = new Map<string, HistoryGroup>();
+    for (const item of items) {
+      const key = showTitle(item.name);
+      const g = map.get(key) ?? { key, count: 0, total_bytes: 0, completed: 0, failed: 0, latest: item.added_at, items: [] };
+      g.count++;
+      g.total_bytes += item.size_bytes ?? 0;
+      if (item.status === "completed") g.completed++;
+      if (item.status === "failed")    g.failed++;
+      if (item.added_at > g.latest)   g.latest = item.added_at;
+      g.items.push(item);
+      map.set(key, g);
+    }
+    return [...map.values()].sort((a, b) => b.latest.localeCompare(a.latest));
+  }, [items]);
+
+  function fmtBytes(n: number): string {
+    if (n >= 1e12) return `${(n / 1e12).toFixed(1)} TB`;
+    if (n >= 1e9)  return `${(n / 1e9).toFixed(1)} GB`;
+    if (n >= 1e6)  return `${(n / 1e6).toFixed(0)} MB`;
+    return `${n} B`;
+  }
+
+  const toggleGroup = (key: string) =>
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+
   // ── Pagination helpers ─────────────────────────────────────────────────────
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
@@ -192,6 +246,22 @@ export default function History() {
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden text-sm">
+            <button
+              onClick={() => setGrouped(false)}
+              title="Flat list"
+              className={`flex items-center gap-1.5 px-3 py-2 font-medium transition-colors ${!grouped ? "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+            >
+              <List className="h-4 w-4" /> List
+            </button>
+            <button
+              onClick={() => setGrouped(true)}
+              title="Group by show"
+              className={`flex items-center gap-1.5 border-l border-gray-300 dark:border-gray-600 px-3 py-2 font-medium transition-colors ${grouped ? "bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100" : "text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"}`}
+            >
+              <Layers className="h-4 w-4" /> Group
+            </button>
+          </div>
           <button
             onClick={handleExportCsv}
             disabled={exportingCsv || total === 0}
@@ -279,6 +349,56 @@ export default function History() {
               : "Downloads will appear here after you start your first torrent."}
           </p>
         </div>
+      ) : grouped ? (
+        <>
+          <div className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+            {groups.length} show{groups.length !== 1 ? "s" : ""} · {total} total episode{total !== 1 ? "s" : ""}
+          </div>
+          <div className="space-y-2">
+            {groups.map((g) => {
+              const open = expandedGroups.has(g.key);
+              return (
+                <div key={g.key} className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
+                  <button
+                    onClick={() => toggleGroup(g.key)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                  >
+                    <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+                    <span className="flex-1 font-medium text-gray-900 dark:text-gray-100">{g.key}</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                      {g.count} episode{g.count !== 1 ? "s" : ""} · {fmtBytes(g.total_bytes)}
+                      {g.failed > 0 && <span className="ml-2 text-red-500">{g.failed} failed</span>}
+                    </span>
+                  </button>
+                  {open && (
+                    <div className="border-t border-gray-100 dark:border-gray-800">
+                      <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800 text-sm">
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                          {g.items.map((item) => (
+                            <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                              <td className="max-w-[260px] px-4 py-3">
+                                <p className="line-clamp-1 text-gray-900 dark:text-gray-100" title={item.name}>{item.name}</p>
+                                {item.error_msg && <p className="mt-0.5 truncate text-xs text-red-500" title={item.error_msg}>{item.error_msg}</p>}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{item.size_human}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-xs text-gray-500 dark:text-gray-400">{fmtRelative(item.added_at)}</td>
+                              <td className="whitespace-nowrap px-4 py-3"><StatusBadge status={item.status} /></td>
+                              <td className="px-4 py-3">
+                                <button onClick={() => handleDelete(item.id)} title="Remove" className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500">
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
       ) : (
         <>
           {/* Table */}
