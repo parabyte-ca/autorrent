@@ -27,6 +27,13 @@ import { fmtAgo, fmtDate } from "../utils";
 const QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
 
+function fmtFree(bytes?: number | null): string | null {
+  if (bytes == null) return null;
+  if (bytes >= 1e12) return `${(bytes / 1e12).toFixed(1)} TB free`;
+  if (bytes >= 1e9)  return `${(bytes / 1e9).toFixed(1)} GB free`;
+  return `${(bytes / 1e6).toFixed(0)} MB free`;
+}
+
 const FIELD = [
   "w-full rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm",
   "focus:outline-none focus:ring-2 focus:ring-blue-500",
@@ -65,8 +72,8 @@ function FormModal({ initial, paths, onClose, onSave }: {
   const defaultPath = paths.find((p) => p.is_default);
   const [form, setForm] = useState<WatchlistCreate>(
     initial
-      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled }
-      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true }
+      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false }
+      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false }
   );
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.title.trim() && form.search_query.trim();
@@ -117,10 +124,60 @@ function FormModal({ initial, paths, onClose, onSave }: {
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Save to</label>
               <select value={form.download_path_id ?? ""} onChange={(e) => set("download_path_id", e.target.value ? Number(e.target.value) : undefined)} className={FIELD}>
                 <option value="">Use default</option>
-                {paths.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {paths.map((p) => {
+                  const free = fmtFree(p.free_bytes);
+                  return <option key={p.id} value={p.id}>{p.name}{free ? ` (${free})` : ""}</option>;
+                })}
               </select>
             </div>
           )}
+
+          {/* Advanced options */}
+          <details className="group">
+            <summary className="cursor-pointer select-none text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 list-none flex items-center gap-1">
+              <span className="group-open:rotate-90 transition-transform inline-block">›</span>
+              Advanced options
+            </summary>
+            <div className="mt-3 space-y-3 pl-3 border-l-2 border-gray-100 dark:border-gray-800">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Max size (MB) <span className="text-xs font-normal text-gray-400">optional</span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.max_size_mb ?? ""}
+                  onChange={(e) => set("max_size_mb", e.target.value ? Number(e.target.value) : null)}
+                  placeholder="e.g. 2000"
+                  className={FIELD}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Preferred release groups <span className="text-xs font-normal text-gray-400">comma-separated, in priority order</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.preferred_groups ?? ""}
+                  onChange={(e) => set("preferred_groups", e.target.value || null)}
+                  placeholder="e.g. YIFY, NTb, SPARKS"
+                  className={FIELD}
+                />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={form.prefer_season_packs ?? false}
+                  onChange={(e) => set("prefer_season_packs", e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Prefer season packs</span>
+                  <p className="text-xs text-gray-400 dark:text-gray-500">Download a full season pack when available instead of individual episodes</p>
+                </div>
+              </label>
+            </div>
+          </details>
         </div>
         <div className="mt-5 flex gap-3">
           <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -137,10 +194,12 @@ function FormModal({ initial, paths, onClose, onSave }: {
 
 // ── Watchlist card with episode tracking ──────────────────────────────────────
 
-function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDelete, onRefresh }: {
+function WatchlistCard({ item, paths, scanning, selected, onToggleSelect, onToggle, onScan, onEdit, onDelete, onRefresh }: {
   item: WatchlistItem;
   paths: DownloadPath[];
   scanning: number | "all" | null;
+  selected: boolean;
+  onToggleSelect: () => void;
   onToggle: () => void;
   onScan: () => void;
   onEdit: () => void;
@@ -269,14 +328,23 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
 
       {/* Header */}
       <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
-            <ShowStatusBadge status={item.show_status} />
+        <div className="flex items-start gap-2.5 min-w-0">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
+              <ShowStatusBadge status={item.show_status} />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Looking for: {epLabel(item.season, item.episode)}
+            </p>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Looking for: {epLabel(item.season, item.episode)}
-          </p>
         </div>
         <button
           onClick={onToggle}
@@ -295,7 +363,12 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
           <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{item.quality}</strong></span>
           <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{item.codec ?? "x265"}</strong></span>
           <span>Save to: <strong className="text-gray-700 dark:text-gray-300">{pathName(item.download_path_id)}</strong></span>
+          {item.max_size_mb && <span>Max: <strong className="text-gray-700 dark:text-gray-300">{item.max_size_mb >= 1024 ? `${(item.max_size_mb / 1024).toFixed(1)} GB` : `${item.max_size_mb} MB`}</strong></span>}
+          {item.prefer_season_packs && <span className="text-blue-600 dark:text-blue-400 font-medium">Season packs</span>}
         </div>
+        {item.preferred_groups && (
+          <div>Groups: <strong className="text-gray-700 dark:text-gray-300">{item.preferred_groups}</strong></div>
+        )}
         <div className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
           Checked: {fmtDate(item.last_checked ?? undefined)}
@@ -496,12 +569,14 @@ function WatchlistCard({ item, paths, scanning, onToggle, onScan, onEdit, onDele
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Watchlist() {
-  const [items,    setItems]   = useState<WatchlistItem[]>([]);
-  const [paths,    setPaths]   = useState<DownloadPath[]>([]);
-  const [loading,  setLoading] = useState(true);
-  const [scanning, setScanning]= useState<number | "all" | null>(null);
-  const [modal,    setModal]   = useState<WatchlistItem | true | null>(null);
-  const [toast,    setToast]   = useState<string | null>(null);
+  const [items,      setItems]     = useState<WatchlistItem[]>([]);
+  const [paths,      setPaths]     = useState<DownloadPath[]>([]);
+  const [loading,    setLoading]   = useState(true);
+  const [scanning,   setScanning]  = useState<number | "all" | null>(null);
+  const [modal,      setModal]     = useState<WatchlistItem | true | null>(null);
+  const [toast,      setToast]     = useState<string | null>(null);
+  const [selected,   setSelected]  = useState<Set<number>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -538,6 +613,41 @@ export default function Watchlist() {
     } finally { setScanning(null); }
   };
 
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((prev) =>
+      prev.size === items.length ? new Set() : new Set(items.map((i) => i.id))
+    );
+  };
+
+  const handleBulkEnable = async (enabled: boolean) => {
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selected].map((id) => api.watchlist.update(id, { enabled })));
+      showToast(`${selected.size} item${selected.size !== 1 ? "s" : ""} ${enabled ? "enabled" : "disabled"}.`);
+      setSelected(new Set());
+      load();
+    } finally { setBulkWorking(false); }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selected.size} selected show${selected.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    setBulkWorking(true);
+    try {
+      await Promise.all([...selected].map((id) => api.watchlist.delete(id)));
+      showToast(`Deleted ${selected.size} show${selected.size !== 1 ? "s" : ""}.`);
+      setSelected(new Set());
+      load();
+    } finally { setBulkWorking(false); }
+  };
+
   if (loading) return (
     <div className="flex h-full items-center justify-center">
       <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
@@ -554,6 +664,18 @@ export default function Watchlist() {
           </p>
         </div>
         <div className="flex gap-2">
+          {items.length > 0 && (
+            <label className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 text-sm text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
+              <input
+                type="checkbox"
+                checked={selected.size > 0 && selected.size === items.length}
+                ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < items.length; }}
+                onChange={toggleSelectAll}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600"
+              />
+              <span className="text-xs">All</span>
+            </label>
+          )}
           <button
             onClick={() => handleScan()}
             disabled={scanning !== null}
@@ -572,6 +694,44 @@ export default function Watchlist() {
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-3">
+          <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+            {selected.size} selected
+          </span>
+          <div className="ml-auto flex gap-2">
+            <button
+              onClick={() => handleBulkEnable(true)}
+              disabled={bulkWorking}
+              className="rounded-lg border border-green-300 dark:border-green-700 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-green-700 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-950 disabled:opacity-50"
+            >
+              Enable
+            </button>
+            <button
+              onClick={() => handleBulkEnable(false)}
+              disabled={bulkWorking}
+              className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              Disable
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkWorking}
+              className="rounded-lg border border-red-200 dark:border-red-900 bg-white dark:bg-gray-900 px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50"
+            >
+              Delete
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {items.length === 0 ? (
         <div className="py-20 text-center text-gray-400 dark:text-gray-600">
           <Tv className="mx-auto mb-3 h-12 w-12 opacity-30" />
@@ -586,6 +746,8 @@ export default function Watchlist() {
               item={item}
               paths={paths}
               scanning={scanning}
+              selected={selected.has(item.id)}
+              onToggleSelect={() => toggleSelect(item.id)}
               onToggle={() => handleToggle(item)}
               onScan={() => handleScan(item.id)}
               onEdit={() => setModal(item)}

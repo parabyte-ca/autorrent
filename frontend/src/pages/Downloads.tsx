@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, Download, Loader2, RefreshCw, Trash2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Download, Loader2, RefreshCw, Search, Trash2, XCircle } from "lucide-react";
 import { api, type Download as DL } from "../api/client";
 import { fmtDate, fmtSize } from "../utils";
 
@@ -66,9 +66,20 @@ function DownloadRow({ d, onDelete }: { d: DL; onDelete: (id: number) => void })
   const speed = fmtSpeed(d.dlspeed);
   const eta   = fmtEta(d.eta);
   const pct   = d.progress != null ? Math.round(d.progress * 100) : null;
+  const searchHref = `/search?q=${encodeURIComponent(d.title.replace(/S\d+E\d+.*/i, "").trim())}`;
 
   return (
     <li className="px-4 py-3">
+      {d.is_stale && (
+        <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>Stalled — no activity for over 2 hours.</span>
+          <a href={searchHref} className="ml-auto flex items-center gap-1 font-medium hover:underline">
+            <Search className="h-3 w-3" />
+            Re-search
+          </a>
+        </div>
+      )}
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-1">{d.title}</p>

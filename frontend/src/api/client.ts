@@ -68,6 +68,9 @@ export interface WatchlistItem {
   show_status_checked_at: string | null;
   tvmaze_id: number | null;
   show_status_override: boolean;
+  max_size_mb?: number | null;
+  preferred_groups?: string | null;
+  prefer_season_packs?: boolean;
 }
 
 export interface WatchlistCreate {
@@ -79,6 +82,9 @@ export interface WatchlistCreate {
   episode: number;
   download_path_id?: number;
   enabled: boolean;
+  max_size_mb?: number | null;
+  preferred_groups?: string | null;
+  prefer_season_packs?: boolean;
 }
 
 export interface Download {
@@ -93,6 +99,7 @@ export interface Download {
   progress?: number;
   eta?: number;
   dlspeed?: number;
+  is_stale?: boolean;
 }
 
 export interface DownloadPath {
@@ -100,6 +107,8 @@ export interface DownloadPath {
   name: string;
   path: string;
   is_default: boolean;
+  free_bytes?: number | null;
+  total_bytes?: number | null;
 }
 
 export type Settings = Record<string, string>;

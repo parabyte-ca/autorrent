@@ -25,6 +25,11 @@ class WatchlistItem(Base):
     tvmaze_id = Column(Integer, nullable=True)
     show_status_override = Column(Boolean, default=False, server_default="0")
 
+    # Download quality controls
+    max_size_mb = Column(Integer, nullable=True)          # reject results larger than this
+    preferred_groups = Column(String, nullable=True)      # comma-separated release groups, ranked
+    prefer_season_packs = Column(Boolean, default=False, server_default="0")
+
     episodes = relationship(
         "WatchlistEpisode",
         back_populates="watchlist_item",
