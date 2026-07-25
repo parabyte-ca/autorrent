@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import {
   AlertCircle,
+  ArrowDownUp,
   Download,
   ExternalLink,
   Loader2,
@@ -241,6 +242,8 @@ export default function Search() {
   const [codec,       setCodec]       = useState("x265");
   const [indexer,     setIndexer]     = useState("all");
   const [filterAdult, setFilterAdult] = useState(true);
+  const [minSeeds,    setMinSeeds]    = useState(0);
+  const [sortBy,      setSortBy]      = useState<"seeds" | "size-asc" | "size-desc">("seeds");
   const [results,     setResults]     = useState<TorrentResult[]>([]);
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState<string | null>(null);
@@ -316,6 +319,15 @@ export default function Search() {
 
   const CTRL = "rounded-lg border border-gray-300 dark:border-gray-600 px-2.5 py-1.5 text-sm dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500";
 
+  // Apply client-side filter and sort after results arrive.
+  const displayResults = [...results]
+    .filter((r) => r.seeds >= minSeeds)
+    .sort((a, b) => {
+      if (sortBy === "size-asc")  return a.size_bytes - b.size_bytes;
+      if (sortBy === "size-desc") return b.size_bytes - a.size_bytes;
+      return b.seeds - a.seeds;
+    });
+
   return (
     <div className="px-4 py-6 sm:px-6">
       <div className="mb-6">
@@ -364,6 +376,25 @@ export default function Search() {
           </select>
         </div>
 
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Min seeds</label>
+          <input
+            type="number"
+            min={0}
+            value={minSeeds}
+            onChange={(e) => setMinSeeds(Math.max(0, Number(e.target.value)))}
+            className={`w-16 ${CTRL}`}
+          />
+        </div>
+        <div className="flex items-center gap-1.5">
+          <ArrowDownUp className="h-3.5 w-3.5 text-gray-400" />
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} className={CTRL}>
+            <option value="seeds">Seeds ↓</option>
+            <option value="size-asc">Size ↑</option>
+            <option value="size-desc">Size ↓</option>
+          </select>
+        </div>
+
         <button
           onClick={() => setFilterAdult((v) => !v)}
           title={filterAdult ? "Adult content is filtered — click to disable" : "Adult content is visible — click to filter"}
@@ -389,11 +420,16 @@ export default function Search() {
       {/* Results */}
       {results.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm">
-          <div className="border-b border-gray-100 dark:border-gray-800 px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
-            {results.length} result{results.length !== 1 ? "s" : ""}
+          <div className="border-b border-gray-100 dark:border-gray-800 px-4 py-3 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+            <span>{displayResults.length} result{displayResults.length !== 1 ? "s" : ""}</span>
+            {results.length !== displayResults.length && (
+              <span className="text-xs text-gray-400 dark:text-gray-600">
+                ({results.length - displayResults.length} filtered by min seeds)
+              </span>
+            )}
           </div>
           <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-            {results.map((r, i) => (
+            {displayResults.map((r, i) => (
               <li key={r.info_hash ?? i} className="flex flex-col gap-2 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 sm:flex-row sm:items-center">
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -443,6 +479,12 @@ export default function Search() {
         </div>
       )}
 
+      {!loading && displayResults.length === 0 && results.length > 0 && !error && (
+        <div className="py-16 text-center text-gray-400 dark:text-gray-600">
+          <SearchIcon className="mx-auto mb-3 h-10 w-10 opacity-30" />
+          <p>All {results.length} result{results.length !== 1 ? "s" : ""} filtered out. Try lowering the Min seeds threshold.</p>
+        </div>
+      )}
       {!loading && results.length === 0 && query && !error && (
         <div className="py-16 text-center text-gray-400 dark:text-gray-600">
           <SearchIcon className="mx-auto mb-3 h-10 w-10 opacity-30" />
