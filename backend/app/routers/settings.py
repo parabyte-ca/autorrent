@@ -53,7 +53,7 @@ DEFAULTS: dict[str, str] = {
 }
 
 # Keys stored in the DB but never sent to the frontend
-_PRIVATE_KEYS = {"session_secret"}
+_PRIVATE_KEYS = {"session_secret", "last_digest_sent_at"}
 
 
 def _load_settings(db: Session) -> dict[str, str]:
@@ -92,8 +92,9 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
     if "digest_day_of_week" in updates or "digest_hour" in updates:
         try:
             loaded = _load_settings(db)
-            day  = str(updates.get("digest_day_of_week") or loaded.get("digest_day_of_week") or "mon")
-            hour = int(updates.get("digest_hour") or loaded.get("digest_hour") or 8)
+            day = str(updates.get("digest_day_of_week") or loaded.get("digest_day_of_week") or "mon")
+            hour_raw = updates.get("digest_hour") if "digest_hour" in updates else loaded.get("digest_hour")
+            hour = int(hour_raw) if hour_raw is not None and str(hour_raw) != "" else 8
             reschedule_digest(day, hour)
         except Exception:
             pass
