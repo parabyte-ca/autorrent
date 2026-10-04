@@ -505,6 +505,22 @@ def run_weekly_digest() -> None:
     if s.get("digest_enabled", "false").lower() != "true":
         return
 
+    # Deduplication guard: skip if already sent within the past 12 hours.
+    # This prevents double-sends if the scheduler fires twice (e.g. container
+    # restart at the scheduled hour, or two replicas running simultaneously).
+    last_sent_str = s.get("last_digest_sent_at", "")
+    if last_sent_str:
+        try:
+            last_sent = datetime.fromisoformat(last_sent_str)
+            if (datetime.now(timezone.utc) - last_sent).total_seconds() < 12 * 3600:
+                logger.info(
+                    "Weekly digest skipped — already sent at %s (within 12 h window).",
+                    last_sent_str,
+                )
+                return
+        except Exception:
+            pass
+
     recipients_raw = s.get("digest_recipients", "") or ""
     recipients = [r.strip() for r in recipients_raw.replace("\n", ",").split(",") if r.strip()]
     if not recipients:
@@ -546,8 +562,29 @@ def run_weekly_digest() -> None:
     }
     try:
         send_email(smtp_cfg, recipients, html, week_label)
+        # Record send time so the deduplication guard above works correctly.
+        _record_digest_sent()
     except Exception as e:
         logger.error("Digest send failed: %s", e)
+
+
+def _record_digest_sent() -> None:
+    from ..database import SessionLocal
+    from ..models import Setting
+
+    db = SessionLocal()
+    try:
+        ts = datetime.now(timezone.utc).isoformat()
+        row = db.query(Setting).filter(Setting.key == "last_digest_sent_at").first()
+        if row:
+            row.value = ts
+        else:
+            db.add(Setting(key="last_digest_sent_at", value=ts))
+        db.commit()
+    except Exception as e:
+        logger.error("Failed to record digest send timestamp: %s", e)
+    finally:
+        db.close()
 
 
 def _get_interval() -> int:
@@ -571,8 +608,9 @@ def _get_digest_schedule() -> tuple[str, int]:
     db = SessionLocal()
     try:
         settings = {s.key: s.value for s in db.query(Setting).all()}
-        day  = settings.get("digest_day_of_week") or "mon"
-        hour = int(settings.get("digest_hour") or 8)
+        day = settings.get("digest_day_of_week") or "mon"
+        hour_str = settings.get("digest_hour")
+        hour = int(hour_str) if hour_str is not None and hour_str != "" else 8
         return day, hour
     except Exception:
         return "mon", 8

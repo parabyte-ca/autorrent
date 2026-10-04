@@ -577,6 +577,7 @@ export default function Watchlist() {
   const [toast,      setToast]     = useState<string | null>(null);
   const [selected,   setSelected]  = useState<Set<number>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
+  const [search,     setSearch]    = useState("");
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
@@ -613,6 +614,15 @@ export default function Watchlist() {
     } finally { setScanning(null); }
   };
 
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? items.filter(
+        (i) =>
+          i.title.toLowerCase().includes(q) ||
+          i.search_query.toLowerCase().includes(q)
+      )
+    : items;
+
   const toggleSelect = (id: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -622,9 +632,17 @@ export default function Watchlist() {
   };
 
   const toggleSelectAll = () => {
-    setSelected((prev) =>
-      prev.size === items.length ? new Set() : new Set(items.map((i) => i.id))
-    );
+    const visibleIds = filtered.map((i) => i.id);
+    setSelected((prev) => {
+      const allSelected = visibleIds.every((id) => prev.has(id));
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
   };
 
   const handleBulkEnable = async (enabled: boolean) => {
@@ -654,9 +672,13 @@ export default function Watchlist() {
     </div>
   );
 
+  const visibleIds = filtered.map((i) => i.id);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someVisibleSelected = visibleIds.some((id) => selected.has(id)) && !allVisibleSelected;
+
   return (
     <div className="px-4 py-6 sm:px-6">
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Watchlist</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
@@ -668,8 +690,8 @@ export default function Watchlist() {
             <label className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 text-sm text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
               <input
                 type="checkbox"
-                checked={selected.size > 0 && selected.size === items.length}
-                ref={(el) => { if (el) el.indeterminate = selected.size > 0 && selected.size < items.length; }}
+                checked={allVisibleSelected}
+                ref={(el) => { if (el) el.indeterminate = someVisibleSelected; }}
                 onChange={toggleSelectAll}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600"
               />
@@ -693,6 +715,20 @@ export default function Watchlist() {
           </button>
         </div>
       </div>
+
+      {/* Search bar */}
+      {items.length > 0 && (
+        <div className="mb-4 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter shows…"
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 py-2 pl-9 pr-4 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+      )}
 
       {/* Bulk action bar */}
       {selected.size > 0 && (
@@ -738,24 +774,39 @@ export default function Watchlist() {
           <p className="font-medium">No shows on your watchlist yet.</p>
           <p className="mt-1 text-sm">Click "Add show" or use the Search page.</p>
         </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => (
-            <WatchlistCard
-              key={item.id}
-              item={item}
-              paths={paths}
-              scanning={scanning}
-              selected={selected.has(item.id)}
-              onToggleSelect={() => toggleSelect(item.id)}
-              onToggle={() => handleToggle(item)}
-              onScan={() => handleScan(item.id)}
-              onEdit={() => setModal(item)}
-              onDelete={() => handleDelete(item.id)}
-              onRefresh={load}
-            />
-          ))}
+      ) : filtered.length === 0 ? (
+        <div className="py-16 text-center text-gray-400 dark:text-gray-600">
+          <Search className="mx-auto mb-3 h-10 w-10 opacity-30" />
+          <p className="font-medium">No shows match "{search}"</p>
+          <button onClick={() => setSearch("")} className="mt-2 text-sm text-blue-500 hover:underline">
+            Clear filter
+          </button>
         </div>
+      ) : (
+        <>
+          {search && (
+            <p className="mb-3 text-xs text-gray-400 dark:text-gray-500">
+              {filtered.length} of {items.length} show{items.length !== 1 ? "s" : ""} match
+            </p>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((item) => (
+              <WatchlistCard
+                key={item.id}
+                item={item}
+                paths={paths}
+                scanning={scanning}
+                selected={selected.has(item.id)}
+                onToggleSelect={() => toggleSelect(item.id)}
+                onToggle={() => handleToggle(item)}
+                onScan={() => handleScan(item.id)}
+                onEdit={() => setModal(item)}
+                onDelete={() => handleDelete(item.id)}
+                onRefresh={load}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       {modal !== null && (
