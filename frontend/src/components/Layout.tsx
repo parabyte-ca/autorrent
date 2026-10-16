@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  ArrowUpCircle,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -15,13 +16,15 @@ import {
 } from "lucide-react";
 import { useTheme, type Theme } from "../ThemeContext";
 import { authStore } from "../auth";
+import { api } from "../api/client";
 
 const nav = [
-  { to: "/search",    label: "Search",    icon: Search   },
-  { to: "/watchlist", label: "Watchlist", icon: Tv       },
-  { to: "/downloads", label: "Downloads", icon: Download },
-  { to: "/history",   label: "History",   icon: Clock    },
-  { to: "/settings",  label: "Settings",  icon: Settings },
+  { to: "/search",    label: "Search",    icon: Search        },
+  { to: "/watchlist", label: "Watchlist", icon: Tv            },
+  { to: "/downloads", label: "Downloads", icon: Download      },
+  { to: "/history",   label: "History",   icon: Clock         },
+  { to: "/settings",  label: "Settings",  icon: Settings      },
+  { to: "/updates",   label: "Updates",   icon: ArrowUpCircle },
 ];
 
 const themeButtons: { value: Theme; icon: typeof Sun; title: string }[] = [
@@ -34,11 +37,19 @@ export default function Layout() {
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
   const [version, setVersion] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useEffect(() => {
     fetch("/health")
       .then((r) => r.json())
       .then((d) => setVersion(d.version ?? null))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!authStore.getToken()) return;
+    api.updates.status()
+      .then((s) => setUpdateAvailable(s.update_available))
       .catch(() => {});
   }, []);
 
@@ -112,7 +123,7 @@ export default function Layout() {
               to={to}
               title={collapsed ? label : undefined}
               className={({ isActive }) =>
-                `flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                `relative flex items-center rounded-lg py-2.5 text-sm font-medium transition-colors ${
                   collapsed ? "justify-center px-0" : "gap-3 px-3"
                 } ${
                   isActive
@@ -121,7 +132,12 @@ export default function Layout() {
                 }`
               }
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              <span className="relative shrink-0">
+                <Icon className="h-4 w-4" />
+                {to === "/updates" && updateAvailable && (
+                  <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+                )}
+              </span>
               {!collapsed && label}
             </NavLink>
           ))}
@@ -188,7 +204,12 @@ export default function Layout() {
               }`
             }
           >
-            <Icon className="h-5 w-5" />
+            <span className="relative">
+              <Icon className="h-5 w-5" />
+              {to === "/updates" && updateAvailable && (
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-white dark:ring-gray-900" />
+              )}
+            </span>
             {label}
           </NavLink>
         ))}
