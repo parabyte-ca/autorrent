@@ -189,6 +189,35 @@ export interface DuplicateCheckResult {
   matched_at: string | null;
 }
 
+export interface LatestRelease {
+  version: string;
+  name: string;
+  notes: string;
+  url: string;
+  published_at: string;
+}
+
+export interface HelperInfo {
+  configured: boolean;
+  connected: boolean;
+  last_seen: string | null;
+  every_minutes: number;
+}
+
+export interface UpdateStatus {
+  current_version: string;
+  latest_release: LatestRelease | null;
+  update_available: boolean;
+  checked_at: string | null;
+  check_error: string | null;
+  helper: HelperInfo;
+  upgrade_state: "requested" | "running" | "succeeded" | "failed" | null;
+  upgrade_message: string | null;
+  can_upgrade: boolean;
+  helper_install_cmd: string;
+  upgrade_log?: string;
+}
+
 // ── API client ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -276,6 +305,16 @@ export const api = {
         body: JSON.stringify({ password }),
       }),
     revoke: () => req<{ ok: boolean }>("/auth/revoke", { method: "POST" }),
+  },
+
+  updates: {
+    status: () => req<UpdateStatus>("/admin/updates"),
+    check: () => req<UpdateStatus>("/admin/updates/check", { method: "POST" }),
+    upgrade: (version: string) =>
+      req<UpdateStatus>("/admin/updates/upgrade", {
+        method: "POST",
+        body: JSON.stringify({ version }),
+      }),
   },
 
   settings: {

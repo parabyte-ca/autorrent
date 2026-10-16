@@ -619,6 +619,8 @@ def _get_digest_schedule() -> tuple[str, int]:
 
 
 def start_scheduler() -> None:
+    from .updater import daily_update_check
+
     interval = _get_interval()
     _scheduler.add_job(
         scan_watchlist,
@@ -637,6 +639,12 @@ def start_scheduler() -> None:
         run_weekly_digest,
         trigger=CronTrigger(day_of_week=digest_day, hour=digest_hour, minute=0, timezone="UTC"),
         id="weekly_digest",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        daily_update_check,
+        trigger=CronTrigger(hour=3, minute=17, timezone="UTC"),
+        id="update_check",
         replace_existing=True,
     )
     _scheduler.start()

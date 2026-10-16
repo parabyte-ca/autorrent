@@ -50,10 +50,17 @@ DEFAULTS: dict[str, str] = {
     "digest_excluded_libs": "",
     # Security
     "ui_password": "",
+    # Updates
+    "app_source_url": "https://github.com/parabyte-ca/autorrent",
 }
 
 # Keys stored in the DB but never sent to the frontend
-_PRIVATE_KEYS = {"session_secret", "last_digest_sent_at"}
+_PRIVATE_KEYS = {
+    "session_secret",
+    "last_digest_sent_at",
+    "update_release_cache",
+    "update_notified_version",
+}
 
 
 def _load_settings(db: Session) -> dict[str, str]:

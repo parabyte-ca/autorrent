@@ -13,7 +13,7 @@ from sqlalchemy import text
 from .database import Base, SessionLocal, engine
 from .middleware.auth import AuthMiddleware
 from .models import Setting
-from .routers import auth, backup, downloads, health, history, paths, search, settings, watchlist
+from .routers import auth, backup, downloads, health, history, paths, search, settings, updates, watchlist
 from .services.scheduler import start_scheduler, stop_scheduler
 
 STATIC_DIR = pathlib.Path("/app/static")
@@ -77,6 +77,7 @@ app.include_router(search.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")
 app.include_router(downloads.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
+app.include_router(updates.router, prefix="/api")
 app.include_router(paths.router, prefix="/api")
 
 # Serve compiled React frontend (production)

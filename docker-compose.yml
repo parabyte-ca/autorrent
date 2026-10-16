@@ -8,11 +8,17 @@ services:
     volumes:
       # Persists the SQLite database across container restarts
       - ./data:/app/data
+      # Shared folder for in-app upgrades (must match APP_UPGRADE_FOLDER below)
+      - ./upgrade:/upgrade
       # Optional: give the container access to NAS paths
       # - /mnt/nas:/mnt/nas
     environment:
       - DATABASE_URL=sqlite:////app/data/autorrent.db
       - TZ=America/Toronto
+      # In-app upgrade support
+      - APP_UPGRADE_FOLDER=/upgrade
+      # Set to false to disable automatic daily release checks
+      # - APP_UPDATE_CHECK=true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
