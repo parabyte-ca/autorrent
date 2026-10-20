@@ -54,6 +54,25 @@ die()  { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ERROR: $*" >&2; exit 1; }
 
 cd "$REPO_DIR"
 
+# When run as root (e.g. sudo bash update.sh), git pull must use the invoking
+# user's SSH key.  SUDO_USER is set by sudo; logname falls back to the login
+# name for non-sudo invocations where root legitimately has no SSH key.
+_GIT_USER="${SUDO_USER:-}"
+if [[ -z "$_GIT_USER" ]] && command -v logname &>/dev/null 2>&1; then
+    _GIT_USER="$(logname 2>/dev/null || true)"
+fi
+# If we resolved a non-root user, wrap git in sudo -u <user> -i; otherwise run
+# git directly (the caller is already the right user or has their own key).
+if [[ -n "$_GIT_USER" && "$_GIT_USER" != "root" ]]; then
+    git_pull() { sudo -u "$_GIT_USER" -i git -C "$REPO_DIR" "$@"; }
+    git_fetch() { sudo -u "$_GIT_USER" -i git -C "$REPO_DIR" fetch "$@"; }
+    git_checkout() { sudo -u "$_GIT_USER" -i git -C "$REPO_DIR" checkout "$@"; }
+else
+    git_pull() { git "$@"; }
+    git_fetch() { git fetch "$@"; }
+    git_checkout() { git checkout "$@"; }
+fi
+
 # ── Load .env for any local overrides ──────────────────────────────────────────
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -74,7 +93,7 @@ fi
 
 if [[ -n "$OPT_ROLLBACK_REV" ]]; then
     info "Rolling back to $OPT_ROLLBACK_REV ..."
-    git checkout "$OPT_ROLLBACK_REV" -- .
+    git_checkout "$OPT_ROLLBACK_REV" -- .
     OPT_NO_GIT=true
     OPT_SKIP_PREFLIGHT=true
 fi
@@ -83,14 +102,14 @@ fi
 
 if [[ "$OPT_NO_GIT" == false ]]; then
     info "Pulling latest code (branch: $BRANCH) ..."
-    git pull origin "$BRANCH"
+    git_pull pull origin "$BRANCH"
 fi
 
 if [[ -n "$OPT_VERSION" ]]; then
     info "Checking out tag/version: $OPT_VERSION ..."
-    git fetch --tags origin
+    git_fetch --tags origin
     # Try v-prefixed tag first, then bare version.
-    git checkout "v${OPT_VERSION}" 2>/dev/null || git checkout "$OPT_VERSION"
+    git_checkout "v${OPT_VERSION}" 2>/dev/null || git_checkout "$OPT_VERSION"
 fi
 
 # ── Pre-flight DB migration test ───────────────────────────────────────────────
@@ -168,7 +187,7 @@ if [[ $TRIES -ge 30 ]]; then
     info "Container did not become healthy in time."
     if [[ -n "$ROLLBACK_REV" ]]; then
         info "Attempting automatic rollback to $ROLLBACK_REV ..."
-        git checkout "$ROLLBACK_REV" -- .
+        git_checkout "$ROLLBACK_REV" -- .
         if [[ "$OPT_PULL" == true ]]; then
             docker compose -f "$COMPOSE_FILE" pull || true
         else
