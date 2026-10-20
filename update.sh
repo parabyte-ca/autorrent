@@ -61,15 +61,15 @@ _GIT_USER="${SUDO_USER:-}"
 if [[ -z "$_GIT_USER" ]] && command -v logname &>/dev/null 2>&1; then
     _GIT_USER="$(logname 2>/dev/null || true)"
 fi
-# If we resolved a non-root user, wrap git in sudo -u <user> -i; otherwise run
-# git directly (the caller is already the right user or has their own key).
+# If we resolved a non-root user, run git as that user (without -i so that
+# SSH_AUTH_SOCK and other env vars are preserved for SSH key/agent access).
 if [[ -n "$_GIT_USER" && "$_GIT_USER" != "root" ]]; then
-    git_pull() { sudo -u "$_GIT_USER" -i git -C "$REPO_DIR" "$@"; }
-    git_fetch() { sudo -u "$_GIT_USER" -i git -C "$REPO_DIR" fetch "$@"; }
-    git_checkout() { sudo -u "$_GIT_USER" -i git -C "$REPO_DIR" checkout "$@"; }
+    git_pull()     { sudo -u "$_GIT_USER" git -C "$REPO_DIR" "$@"; }
+    git_fetch()    { sudo -u "$_GIT_USER" git -C "$REPO_DIR" fetch "$@"; }
+    git_checkout() { sudo -u "$_GIT_USER" git -C "$REPO_DIR" checkout "$@"; }
 else
-    git_pull() { git "$@"; }
-    git_fetch() { git fetch "$@"; }
+    git_pull()     { git "$@"; }
+    git_fetch()    { git fetch "$@"; }
     git_checkout() { git checkout "$@"; }
 fi
 
