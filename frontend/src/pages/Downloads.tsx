@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Clock, Download, Loader2, RefreshCw, Search, Trash2, XCircle } from "lucide-react";
 import { api, type Download as DL } from "../api/client";
 import { fmtDate, fmtSize } from "../utils";
@@ -74,10 +75,10 @@ function DownloadRow({ d, onDelete }: { d: DL; onDelete: (id: number) => void })
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           <span>Stalled — no activity for over 2 hours.</span>
-          <a href={searchHref} className="ml-auto flex items-center gap-1 font-medium hover:underline">
+          <Link to={searchHref} className="ml-auto flex items-center gap-1 font-medium hover:underline">
             <Search className="h-3 w-3" />
             Re-search
-          </a>
+          </Link>
         </div>
       )}
       <div className="flex items-start justify-between gap-2">
@@ -147,7 +148,9 @@ export default function Downloads() {
   };
 
   const _inProgress = new Set(["downloading", "adding"]);
-  const active   = downloads.filter((d) => _inProgress.has(d.status));
+  const active   = downloads
+    .filter((d) => _inProgress.has(d.status))
+    .sort((a, b) => (b.progress ?? -1) - (a.progress ?? -1));
   const finished = downloads.filter((d) => !_inProgress.has(d.status));
 
   if (loading) return (

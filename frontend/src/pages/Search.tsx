@@ -1,7 +1,9 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowDownUp,
+  Clock,
   Download,
   ExternalLink,
   Loader2,
@@ -9,8 +11,37 @@ import {
   Search as SearchIcon,
   Shield,
   Users,
+  X,
 } from "lucide-react";
 import { api, type DownloadPath, type DuplicateCheckResult, type TorrentResult, type WatchlistCreate } from "../api/client";
+
+// ── Search history ────────────────────────────────────────────────────────────
+
+const HISTORY_KEY = "ar-search-history";
+const MAX_HISTORY = 10;
+
+function loadHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : [];
+  } catch { return []; }
+}
+
+function pushHistory(q: string, current: string[]): string[] {
+  const t = q.trim();
+  if (!t) return current;
+  const next = [t, ...current.filter((x) => x !== t)].slice(0, MAX_HISTORY);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+  return next;
+}
+
+function removeHistory(q: string, current: string[]): string[] {
+  const next = current.filter((x) => x !== q);
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+  return next;
+}
 
 const QUALITIES = ["Any", "4K", "1080p", "720p", "480p"];
 const CODECS    = ["x265", "x264", "AV1", "Any"];
@@ -249,44 +280,62 @@ function WatchlistModal({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function Search() {
-  const [query,       setQuery]       = useState("");
-  const [quality,     setQuality]     = useState("Any");
-  const [codec,       setCodec]       = useState("x265");
-  const [indexer,     setIndexer]     = useState("all");
-  const [filterAdult, setFilterAdult] = useState(true);
-  const [minSeeds,    setMinSeeds]    = useState(0);
-  const [sortBy,      setSortBy]      = useState<"seeds" | "size-asc" | "size-desc">("seeds");
-  const [results,     setResults]     = useState<TorrentResult[]>([]);
-  const [loading,     setLoading]     = useState(false);
-  const [error,       setError]       = useState<string | null>(null);
-  const [paths,       setPaths]       = useState<DownloadPath[]>([]);
-  const [dlTarget,    setDlTarget]    = useState<TorrentResult | null>(null);
-  const [dlForce,     setDlForce]     = useState(false);
-  const [checkingDl,  setCheckingDl]  = useState<TorrentResult | null>(null);
-  const [dupWarning,  setDupWarning]  = useState<{ result: TorrentResult; dup: DuplicateCheckResult } | null>(null);
-  const [wlTarget,    setWlTarget]    = useState<TorrentResult | null>(null);
-  const [toast,       setToast]       = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialQ = searchParams.get("q") ?? "";
+
+  const [query,         setQuery]         = useState(initialQ);
+  const [quality,       setQuality]       = useState("Any");
+  const [codec,         setCodec]         = useState("x265");
+  const [indexer,       setIndexer]       = useState("all");
+  const [filterAdult,   setFilterAdult]   = useState(true);
+  const [minSeeds,      setMinSeeds]      = useState(0);
+  const [sortBy,        setSortBy]        = useState<"seeds" | "size-asc" | "size-desc">("seeds");
+  const [results,       setResults]       = useState<TorrentResult[]>([]);
+  const [loading,       setLoading]       = useState(false);
+  const [error,         setError]         = useState<string | null>(null);
+  const [paths,         setPaths]         = useState<DownloadPath[]>([]);
+  const [dlTarget,      setDlTarget]      = useState<TorrentResult | null>(null);
+  const [dlForce,       setDlForce]       = useState(false);
+  const [checkingDl,    setCheckingDl]    = useState<TorrentResult | null>(null);
+  const [dupWarning,    setDupWarning]    = useState<{ result: TorrentResult; dup: DuplicateCheckResult } | null>(null);
+  const [wlTarget,      setWlTarget]      = useState<TorrentResult | null>(null);
+  const [toast,         setToast]         = useState<string | null>(null);
+  const [searchHistory, setSearchHistory] = useState<string[]>(loadHistory);
+  const [showHistory,   setShowHistory]   = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  const doSearch = async () => {
-    if (!query.trim()) return;
+  const doSearch = async (overrideQ?: string) => {
+    const q = (overrideQ ?? query).trim();
+    if (!q) return;
     setLoading(true);
     setError(null);
+    setShowHistory(false);
     try {
       const [res, p] = await Promise.all([
-        api.search(query, indexer, quality, codec, filterAdult),
+        api.search(q, indexer, quality, codec, filterAdult),
         api.paths.list(),
       ]);
       setResults(res);
       setPaths(p);
+      setSearchHistory((prev) => pushHistory(q, prev));
     } catch (e: unknown) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   };
+
+  // Auto-search when arriving via the "Re-search" link from Downloads
+  const hasAutoSearched = useRef(false);
+  useEffect(() => {
+    if (initialQ && !hasAutoSearched.current) {
+      hasAutoSearched.current = true;
+      setSearchParams({}, { replace: true });
+      doSearch(initialQ);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClickDownload = async (r: TorrentResult) => {
     setCheckingDl(r);
@@ -349,16 +398,57 @@ export default function Search() {
 
       {/* Search bar */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row">
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && doSearch()}
-          placeholder="Search for a show, movie, or episode…"
-          className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500"
-        />
+        <div className="relative flex-1">
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && doSearch()}
+            onFocus={() => setShowHistory(true)}
+            onBlur={() => setTimeout(() => setShowHistory(false), 150)}
+            placeholder="Search for a show, movie, or episode…"
+            className="w-full rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2.5 pr-9 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-500"
+          />
+          {query && (
+            <button
+              tabIndex={-1}
+              onClick={() => { setQuery(""); inputRef.current?.focus(); }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              title="Clear"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+          {/* Search history dropdown */}
+          {showHistory && searchHistory.length > 0 && (
+            <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
+              {searchHistory.map((item) => (
+                <div
+                  key={item}
+                  onMouseDown={(e) => { e.preventDefault(); setQuery(item); doSearch(item); }}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  <Clock className="h-3.5 w-3.5 shrink-0 text-gray-400" />
+                  <span className="flex-1 truncate text-gray-700 dark:text-gray-300">{item}</span>
+                  <button
+                    tabIndex={-1}
+                    onMouseDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setSearchHistory((prev) => removeHistory(item, prev));
+                    }}
+                    className="rounded p-0.5 text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400"
+                    title="Remove from history"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <button
-          onClick={doSearch}
+          onClick={() => doSearch()}
           disabled={loading}
           className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
         >
