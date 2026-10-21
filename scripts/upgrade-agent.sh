@@ -77,23 +77,22 @@ fi
 
 # ── Regular run ────────────────────────────────────────────────────────────────
 
-# Require the .env file so we know the upgrade folder path and any extra flags.
-[[ -f "$ENV_FILE" ]] || die ".env not found at $ENV_FILE — cannot determine upgrade folder."
+# Load .env if present (optional — UPGRADE_FOLDER defaults to $REPO_DIR/upgrade).
+if [[ -f "$ENV_FILE" ]]; then
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$key" ]] && continue
+        key="${key// /}"
+        value="${value%%#*}"          # strip inline comments
+        value="${value#\"}"           # strip leading "
+        value="${value%\"}"           # strip trailing "
+        value="${value#\'}"
+        value="${value%\'}"
+        [[ -n "$key" ]] && declare "$key"="$value" 2>/dev/null || true
+    done < "$ENV_FILE"
+fi
 
-# Load the env file (skip comments and blanks; no export needed, just assign).
-while IFS='=' read -r key value; do
-    [[ "$key" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "$key" ]] && continue
-    key="${key// /}"
-    value="${value%%#*}"          # strip inline comments
-    value="${value#\"}"           # strip leading "
-    value="${value%\"}"           # strip trailing "
-    value="${value#\'}"
-    value="${value%\'}"
-    [[ -n "$key" ]] && declare "$key"="$value" 2>/dev/null || true
-done < "$ENV_FILE"
-
-UPGRADE_FOLDER="${APP_UPGRADE_FOLDER:-/upgrade}"
+UPGRADE_FOLDER="${APP_UPGRADE_FOLDER:-$REPO_DIR/upgrade}"
 
 # Allow extra args to update.sh but ONLY --pull and --skip-preflight.
 EXTRA_ARGS=""
