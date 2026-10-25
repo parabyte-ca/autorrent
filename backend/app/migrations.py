@@ -34,6 +34,11 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE downloads ADD COLUMN last_progress_at DATETIME", None),
     ("ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0", None),
     ("ALTER TABLE watchlist ADD COLUMN profile_id INTEGER", None),
+    ("ALTER TABLE watchlist ADD COLUMN poster_url TEXT", None),
+    ("ALTER TABLE watchlist ADD COLUMN summary TEXT", None),
+    ("ALTER TABLE watchlist ADD COLUMN network TEXT", None),
+    ("ALTER TABLE watchlist ADD COLUMN premiered TEXT", None),
+    ("ALTER TABLE watchlist ADD COLUMN metadata_checked_at DATETIME", None),
 ]
 
 

@@ -39,6 +39,7 @@ DEFAULTS: dict[str, str] = {
     "low_disk_warn_gb": "10",
     "default_indexer": "all",
     "default_profile_id": "",
+    "browse_country": "US",
     # Plex
     "plex_enabled": "false",
     "plex_url": "",

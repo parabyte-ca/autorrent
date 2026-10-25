@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -23,6 +24,8 @@ import {
   type WatchlistEpisode,
   type WatchlistItem,
 } from "../api/client";
+import EpisodeGuide from "../components/EpisodeGuide";
+import Poster from "../components/Poster";
 import { fmtAgo, fmtDate } from "../utils";
 
 const QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
@@ -375,14 +378,19 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
             onClick={(e) => e.stopPropagation()}
             className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
+          <Poster url={item.poster_url} title={item.title} className="h-16 w-11" />
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
               <ShowStatusBadge status={item.show_status} />
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Looking for: {epLabel(item.season, item.episode)}
+              {item.network ? ` · ${item.network}` : ""}
             </p>
+            {item.summary && (
+              <p className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500">{item.summary}</p>
+            )}
           </div>
         </div>
         <button
@@ -471,7 +479,13 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
         </button>
 
         {expanded && (
-          <div className="mt-2 space-y-2">
+          <div className="mt-2 space-y-3">
+            <EpisodeGuide watchlistId={item.id} onChanged={() => { fetchEpisodes(); onRefresh(); }} />
+            {episodes !== null && episodes.length > 0 && (
+              <div className="border-t border-gray-100 dark:border-gray-800 pt-2 text-xs font-medium text-gray-400 dark:text-gray-500">
+                Downloaded by AutoRrent — click to remove a record
+              </div>
+            )}
             {/* Loading */}
             {loadingEps && (
               <div className="flex items-center gap-1.5 py-1 text-xs text-gray-400">
@@ -639,6 +653,17 @@ export default function Watchlist() {
 
   useEffect(() => { load(); }, []);
 
+  // Shows added before posters existed (or whose lookup timed out) get filled in
+  // once, in the background; the list refreshes only if something changed.
+  useEffect(() => {
+    if (loading || !items.some((i) => !i.metadata_checked_at)) return;
+    let cancelled = false;
+    api.watchlist.refreshMetadata()
+      .then((r) => { if (!cancelled && r.checked > 0) api.watchlist.list().then((w) => !cancelled && setItems(w)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [loading]);
+
   const handleSave = async (data: WatchlistCreate) => {
     if (modal === true) { await api.watchlist.create(data); showToast("Added!"); }
     else if (modal && typeof modal === "object") { await api.watchlist.update(modal.id, data); showToast("Updated!"); }
@@ -754,6 +779,13 @@ export default function Watchlist() {
             {scanning === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Scan all
           </button>
+          <Link
+            to="/browse"
+            className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            <Search className="h-4 w-4" />
+            Browse
+          </Link>
           <button
             onClick={() => setModal(true)}
             className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -820,7 +852,9 @@ export default function Watchlist() {
         <div className="py-20 text-center text-gray-400 dark:text-gray-600">
           <Tv className="mx-auto mb-3 h-12 w-12 opacity-30" />
           <p className="font-medium">No shows on your watchlist yet.</p>
-          <p className="mt-1 text-sm">Click "Add show" or use the Search page.</p>
+          <p className="mt-1 text-sm">
+            Click "Add show", <Link to="/browse" className="text-blue-600 dark:text-blue-400 underline">browse what's airing</Link>, or use the Search page.
+          </p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="py-16 text-center text-gray-400 dark:text-gray-600">

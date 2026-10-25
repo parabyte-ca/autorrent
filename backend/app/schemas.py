@@ -95,6 +95,11 @@ class WatchlistOut(BaseModel):
     preferred_groups: Optional[str] = None
     prefer_season_packs: bool = False
     profile_id: Optional[int] = None
+    poster_url: Optional[str] = None
+    summary: Optional[str] = None
+    network: Optional[str] = None
+    premiered: Optional[str] = None
+    metadata_checked_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -158,6 +163,12 @@ class ProfileOut(BaseModel):
     watchlist_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class AddFromTvmazeRequest(BaseModel):
+    tvmaze_id: int
+    start: Optional[Literal["next", "beginning"]] = None
+    profile_id: Optional[int] = None
 
 
 class JackettTestRequest(BaseModel):

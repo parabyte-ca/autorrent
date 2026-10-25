@@ -34,6 +34,15 @@ class WatchlistItem(Base):
     # quality / codec / size / groups / season-pack fields above.
     profile_id = Column(Integer, ForeignKey("quality_profiles.id"), nullable=True)
 
+    # Show metadata from TVMaze (poster, blurb, network) — cosmetic only.
+    poster_url = Column(String, nullable=True)
+    summary = Column(String, nullable=True)
+    network = Column(String, nullable=True)
+    premiered = Column(String, nullable=True)
+    # Set after the first lookup attempt, successful or not, so shows TVMaze
+    # does not know are not re-queried on every page load.
+    metadata_checked_at = Column(DateTime, nullable=True)
+
     episodes = relationship(
         "WatchlistEpisode",
         back_populates="watchlist_item",
