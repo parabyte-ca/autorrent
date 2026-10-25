@@ -42,6 +42,8 @@ class WatchlistItem(Base):
     # Set after the first lookup attempt, successful or not, so shows TVMaze
     # does not know are not re-queried on every page load.
     metadata_checked_at = Column(DateTime, nullable=True)
+    # Consecutive lookups that found no poster; drives the retry back-off.
+    metadata_attempts = Column(Integer, default=0, server_default="0")
 
     episodes = relationship(
         "WatchlistEpisode",
