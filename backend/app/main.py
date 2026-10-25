@@ -24,25 +24,46 @@ DATA_DIR = pathlib.Path("/app/data")
 async def lifespan(app: FastAPI):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
-    # Migrate: add codec column if it doesn't exist yet (safe no-op if already present)
+    # Lightweight migrations: each ALTER is a safe no-op if the column exists.
+    # An optional backfill runs only when the ALTER actually added the column,
+    # so existing rows are not treated as brand-new events.
+    migrations: list[tuple[str, str | None]] = [
+        ("ALTER TABLE watchlist ADD COLUMN codec TEXT DEFAULT 'x265'", None),
+        ("ALTER TABLE watchlist ADD COLUMN show_status TEXT", None),
+        ("ALTER TABLE watchlist ADD COLUMN show_status_checked_at DATETIME", None),
+        ("ALTER TABLE watchlist ADD COLUMN tvmaze_id INTEGER", None),
+        ("ALTER TABLE watchlist ADD COLUMN show_status_override INTEGER DEFAULT 0", None),
+        ("ALTER TABLE downloads ADD COLUMN completion_first_seen_at DATETIME", None),
+        ("ALTER TABLE downloads ADD COLUMN qbit_removed INTEGER DEFAULT 0", None),
+        ("ALTER TABLE watchlist ADD COLUMN max_size_mb INTEGER", None),
+        ("ALTER TABLE watchlist ADD COLUMN preferred_groups TEXT", None),
+        ("ALTER TABLE watchlist ADD COLUMN prefer_season_packs INTEGER DEFAULT 0", None),
+        (
+            "ALTER TABLE downloads ADD COLUMN notified_complete INTEGER DEFAULT 0",
+            "UPDATE downloads SET notified_complete = 1 WHERE status IN ('completed', 'seeding', 'done')",
+        ),
+        (
+            "ALTER TABLE downloads ADD COLUMN notified_failed INTEGER DEFAULT 0",
+            "UPDATE downloads SET notified_failed = 1 WHERE status IN ('error', 'failed')",
+        ),
+        ("ALTER TABLE downloads ADD COLUMN notified_stalled INTEGER DEFAULT 0", None),
+        ("ALTER TABLE downloads ADD COLUMN last_progress REAL", None),
+        ("ALTER TABLE downloads ADD COLUMN last_progress_at DATETIME", None),
+        ("ALTER TABLE downloads ADD COLUMN retry_count INTEGER DEFAULT 0", None),
+    ]
     with engine.connect() as conn:
-        for stmt in [
-            "ALTER TABLE watchlist ADD COLUMN codec TEXT DEFAULT 'x265'",
-            "ALTER TABLE watchlist ADD COLUMN show_status TEXT",
-            "ALTER TABLE watchlist ADD COLUMN show_status_checked_at DATETIME",
-            "ALTER TABLE watchlist ADD COLUMN tvmaze_id INTEGER",
-            "ALTER TABLE watchlist ADD COLUMN show_status_override INTEGER DEFAULT 0",
-            "ALTER TABLE downloads ADD COLUMN completion_first_seen_at DATETIME",
-            "ALTER TABLE downloads ADD COLUMN qbit_removed INTEGER DEFAULT 0",
-            "ALTER TABLE watchlist ADD COLUMN max_size_mb INTEGER",
-            "ALTER TABLE watchlist ADD COLUMN preferred_groups TEXT",
-            "ALTER TABLE watchlist ADD COLUMN prefer_season_packs INTEGER DEFAULT 0",
-        ]:
+        for stmt, backfill in migrations:
             try:
                 conn.execute(text(stmt))
                 conn.commit()
             except Exception:
-                pass
+                continue
+            if backfill:
+                try:
+                    conn.execute(text(backfill))
+                    conn.commit()
+                except Exception:
+                    pass
 
     # Seed session_secret on first run (single-threaded here — no race)
     db = SessionLocal()

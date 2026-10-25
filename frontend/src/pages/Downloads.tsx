@@ -74,7 +74,7 @@ function DownloadRow({ d, onDelete }: { d: DL; onDelete: (id: number) => void })
       {d.is_stale && (
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>Stalled — no activity for over 2 hours.</span>
+          <span>Stalled — no download progress for a while.</span>
           <Link to={searchHref} className="ml-auto flex items-center gap-1 font-medium hover:underline">
             <Search className="h-3 w-3" />
             Re-search

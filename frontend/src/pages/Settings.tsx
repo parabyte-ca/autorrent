@@ -52,6 +52,25 @@ function Field({ label, hint, type = "text", value, onChange, placeholder, autoC
   );
 }
 
+function CheckRow({ label, hint, checked, onChange }: {
+  label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600"
+      />
+      <div>
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+        {hint && <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
+      </div>
+    </label>
+  );
+}
+
 // ── Path modal ────────────────────────────────────────────────────────────────
 
 function PathModal({ initial, onClose, onSave }: {
@@ -374,6 +393,11 @@ export default function Settings() {
                       )}
                     </div>
                     <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate">{p.path}</p>
+                    {p.free_bytes != null && (
+                      <p className={`text-xs ${p.low_space ? "font-medium text-amber-600 dark:text-amber-400" : "text-gray-400 dark:text-gray-500"}`}>
+                        {(p.free_bytes / 1e9).toFixed(1)} GB free{p.low_space ? " — low space" : ""}
+                      </p>
+                    )}
                   </div>
                   <button onClick={() => setPathModal(p)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
                     <Edit2 className="h-3.5 w-3.5" />
@@ -385,6 +409,15 @@ export default function Settings() {
               ))}
             </ul>
           )}
+          <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4 sm:max-w-xs">
+            <Field
+              label="Low disk-space warning (GB)"
+              hint="Alert and show a banner when a folder has less free space than this. 0 disables."
+              type="number"
+              value={settings.low_disk_warn_gb ?? "10"}
+              onChange={(v) => set("low_disk_warn_gb", v)}
+            />
+          </div>
         </Section>
 
         {/* Auto-scanner */}
@@ -420,6 +453,31 @@ export default function Settings() {
                 </p>
               </div>
             </label>
+          </div>
+
+          <div className="mt-4 border-t border-gray-100 dark:border-gray-800 pt-4">
+            <CheckRow
+              label="Automatically retry failed or stalled downloads"
+              hint="When a watchlist download errors out or makes no progress, remove it and grab the next-best release for that episode."
+              checked={(settings.retry_enabled ?? "true") === "true"}
+              onChange={(v) => set("retry_enabled", v ? "true" : "false")}
+            />
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field
+                label="Stall after (hours)"
+                hint="No download progress for this long counts as stalled."
+                type="number"
+                value={settings.stall_hours ?? "2"}
+                onChange={(v) => set("stall_hours", v)}
+              />
+              <Field
+                label="Max attempts per episode"
+                hint="Including the first grab. After this AutoRrent gives up and alerts you."
+                type="number"
+                value={settings.retry_max_attempts ?? "3"}
+                onChange={(v) => set("retry_max_attempts", v)}
+              />
+            </div>
           </div>
         </Section>
 
@@ -549,6 +607,30 @@ export default function Settings() {
             — supports Telegram, Discord, Slack, email, Pushover, and 60+ more. Leave blank to disable.
           </p>
           <Field label="Apprise URL" value={settings.apprise_url ?? ""} onChange={(v) => set("apprise_url", v)} placeholder="tgram://bottoken/ChatID" />
+
+          <div className="mt-4 space-y-3 border-t border-gray-100 dark:border-gray-800 pt-4">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Send an alert when…</p>
+            <CheckRow
+              label="A watchlist episode is grabbed"
+              checked={(settings.notify_on_grab ?? "true") === "true"}
+              onChange={(v) => set("notify_on_grab", v ? "true" : "false")}
+            />
+            <CheckRow
+              label="A download completes"
+              checked={(settings.notify_on_complete ?? "true") === "true"}
+              onChange={(v) => set("notify_on_complete", v ? "true" : "false")}
+            />
+            <CheckRow
+              label="A download fails"
+              checked={(settings.notify_on_failed ?? "true") === "true"}
+              onChange={(v) => set("notify_on_failed", v ? "true" : "false")}
+            />
+            <CheckRow
+              label="A download stalls"
+              checked={(settings.notify_on_stalled ?? "true") === "true"}
+              onChange={(v) => set("notify_on_stalled", v ? "true" : "false")}
+            />
+          </div>
         </Section>
 
         {/* Weekly Digest */}

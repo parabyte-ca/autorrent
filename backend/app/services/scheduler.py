@@ -22,9 +22,15 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
     from ..database import SessionLocal
     from ..models import Download, DownloadHistory, DownloadPath, Setting, WatchlistEpisode, WatchlistItem
     from .apprise_notify import notify
+    from .candidates import (
+        WATCHLIST_LOCK, failed_hashes, find_candidates, query_words, title_has_query_word,
+    )
     from .indexers import search_all
     from .qbittorrent import add_torrent
 
+    # Hold the lock for the whole scan so the retry queue cannot grab the same
+    # episode concurrently.
+    WATCHLIST_LOCK.acquire()
     db = SessionLocal()
     try:
         settings = {s.key: s.value for s in db.query(Setting).all()}
@@ -64,37 +70,12 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     )
                     continue
 
-                results = search_all(
-                    query,
-                    quality=item.quality,
-                    codec=item.codec or "x265",
-                    filter_adult=True,
-                )
-                results = [r for r in results if r["seeds"] >= min_seeds]
-
-                # Reject results whose titles don't contain the episode tag.
-                # Some indexers (e.g. EZTV) return unfiltered recent torrents
-                # regardless of the search query, so we must verify the match.
                 ep_tag = f"S{item.season:02d}E{item.episode:02d}"
-                results = [r for r in results if ep_tag.lower() in r["title"].lower()]
-
-                # Episode-tag alone is not enough: two different shows can share
-                # the same SxxExx number. Also require at least one significant
-                # word from the show's search query to appear in the result title.
-                query_words = {
-                    w for w in re.sub(r"[^a-z0-9]", " ", item.search_query.lower()).split()
-                    if len(w) > 1 and w not in _STOP_WORDS
-                }
-                if query_words:
-                    results = [
-                        r for r in results
-                        if query_words & set(re.sub(r"[^a-z0-9]", " ", r["title"].lower()).split())
-                    ]
-
-                # Apply per-item size cap.
-                if item.max_size_mb:
-                    max_bytes = item.max_size_mb * 1024 * 1024
-                    results = [r for r in results if r.get("size_bytes", 0) <= max_bytes]
+                words = query_words(item.search_query)
+                results = find_candidates(
+                    item, item.season, item.episode, min_seeds,
+                    failed_hashes(db, item.id, item.season, item.episode),
+                )
 
                 # Season pack: if enabled, also search for a full-season torrent
                 # and prefer it over a single episode when one is found.
@@ -111,11 +92,9 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     # Must NOT have an episode number — we want packs, not single eps.
                     _ep_pattern = re.compile(r"[Ss]\d+[Ee]\d+")
                     pack_results = [r for r in pack_results if not _ep_pattern.search(r["title"])]
-                    if query_words:
-                        pack_results = [
-                            r for r in pack_results
-                            if query_words & set(re.sub(r"[^a-z0-9]", " ", r["title"].lower()).split())
-                        ]
+                    pack_results = [
+                        r for r in pack_results if title_has_query_word(r["title"], words)
+                    ]
                     if item.max_size_mb:
                         max_bytes = item.max_size_mb * 1024 * 1024
                         pack_results = [r for r in pack_results if r.get("size_bytes", 0) <= max_bytes]
@@ -132,23 +111,8 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     logger.debug("No results for: %s", query)
                     continue
 
-                # Rank by preferred release groups first, then by seeds.
-                preferred = [
-                    g.strip().lower()
-                    for g in (item.preferred_groups or "").split(",")
-                    if g.strip()
-                ]
-                if preferred:
-                    def _group_score(r: dict) -> int:
-                        t = r["title"].lower()
-                        for rank, grp in enumerate(preferred):
-                            if grp in t:
-                                return len(preferred) - rank
-                        return 0
-                    results.sort(key=lambda r: (_group_score(r), r["seeds"]), reverse=True)
-                    best = results[0]
-                else:
-                    best = max(results, key=lambda r: r["seeds"])
+                # find_candidates already ranks by preferred group, then seeds.
+                best = results[0]
 
                 # Secondary guard: skip if a Download record already tracks this episode
                 # (handles the case where the episode is actively downloading).
@@ -157,6 +121,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     .filter(
                         Download.watchlist_id == item.id,
                         Download.title.ilike(f"%{ep_tag}%"),
+                        Download.status.notin_(["failed", "error"]),
                     )
                     .first()
                 )
@@ -254,11 +219,12 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     logger.error("Failed to write watchlist download history: %s", hist_err)
 
                 logger.info("Auto-downloaded: %s", best["title"])
-                notify(
-                    apprise_url,
-                    title=f"AutoRrent — {item.title}",
-                    body=f"⬇️ Downloaded: {best['title']}",
-                )
+                if settings.get("notify_on_grab", "true").strip().lower() == "true":
+                    notify(
+                        apprise_url,
+                        title=f"AutoRrent — {item.title}",
+                        body=f"⬇️ Downloaded: {best['title']}",
+                    )
 
             except Exception as e:
                 logger.error("Error processing watchlist item %d: %s", item.id, e)
@@ -267,6 +233,7 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
         logger.error("Scan failed: %s", e)
     finally:
         db.close()
+        WATCHLIST_LOCK.release()
 
     logger.info("Watchlist scan complete")
     _sync_download_statuses()
@@ -619,6 +586,7 @@ def _get_digest_schedule() -> tuple[str, int]:
 
 
 def start_scheduler() -> None:
+    from .download_events import process_download_events
     from .updater import daily_update_check
 
     interval = _get_interval()
@@ -626,6 +594,12 @@ def start_scheduler() -> None:
         scan_watchlist,
         trigger=IntervalTrigger(minutes=interval),
         id="watchlist_scan",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        process_download_events,
+        trigger=IntervalTrigger(minutes=10),
+        id="download_events",
         replace_existing=True,
     )
     _scheduler.add_job(

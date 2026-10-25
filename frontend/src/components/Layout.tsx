@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
+  AlertTriangle,
   ArrowUpCircle,
   ChevronLeft,
   ChevronRight,
@@ -47,10 +48,25 @@ export default function Layout() {
   }, []);
 
   useEffect(() => {
-    if (!authStore.getToken()) return;
     api.updates.status()
       .then((s) => setUpdateAvailable(s.update_available))
       .catch(() => {});
+  }, []);
+
+  const [lowSpace, setLowSpace] = useState<{ name: string; free: number }[]>([]);
+
+  useEffect(() => {
+    const load = () =>
+      api.paths.list()
+        .then((ps) =>
+          setLowSpace(
+            ps.filter((p) => p.low_space).map((p) => ({ name: p.name, free: (p.free_bytes ?? 0) / 1e9 })),
+          ),
+        )
+        .catch(() => {});
+    load();
+    const id = setInterval(load, 5 * 60_000);
+    return () => clearInterval(id);
   }, []);
 
   const handleLogout = () => {
@@ -184,6 +200,15 @@ export default function Layout() {
       {/* main-scroll: on mobile adds padding to clear the bottom tab bar     */}
       {/* + iOS safe area; on md+ resets to zero (see index.css)              */}
       <main className="flex-1 overflow-y-auto main-scroll">
+        {lowSpace.length > 0 && (
+          <div className="flex items-center gap-2 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-4 py-2 text-xs text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span className="flex-1">
+              Low disk space: {lowSpace.map((p) => `${p.name} (${p.free.toFixed(1)} GB free)`).join(", ")}.
+            </span>
+            <NavLink to="/settings" className="font-medium underline">Settings</NavLink>
+          </div>
+        )}
         <Outlet />
       </main>
 
