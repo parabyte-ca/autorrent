@@ -735,6 +735,22 @@ export default function Settings() {
           />
         </Section>
 
+        {/* Discovery */}
+        <Section title="Discovery">
+          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            The Browse page lists popular shows airing in this country, using free TVMaze schedules.
+          </p>
+          <div className="sm:max-w-xs">
+            <Field
+              label="Country code"
+              hint="Two letters, e.g. US, CA, GB, AU."
+              value={settings.browse_country ?? "US"}
+              onChange={(v) => set("browse_country", v.toUpperCase().slice(0, 2))}
+              placeholder="US"
+            />
+          </div>
+        </Section>
+
         {/* Plex */}
         <Section title="Plex Media Server">
           <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">

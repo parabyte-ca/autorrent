@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import httpx
 
@@ -10,6 +11,21 @@ _STATUS_MAP = {
     "To Be Determined": "To Be Determined",
     "In Development": "In Development",
 }
+
+
+async def _get_json(client: httpx.AsyncClient, path: str, params: dict | None = None):
+    """GET from TVMaze, politely retrying when rate limited (HTTP 429)."""
+    for attempt in range(3):
+        resp = await client.get(f"{_BASE}{path}", params=params)
+        if resp.status_code == 429 and attempt < 2:
+            try:
+                delay = min(float(resp.headers.get("retry-after", "1")), 5.0)
+            except ValueError:
+                delay = 1.0
+            await asyncio.sleep(delay)
+            continue
+        return resp
+    return resp
 
 
 async def search_show(title: str) -> dict | None:
@@ -54,7 +70,7 @@ async def get_episodes(tvmaze_id: int) -> list[dict] | None:
     """
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(f"{_BASE}/shows/{tvmaze_id}/episodes", params={"specials": 1})
+            resp = await _get_json(client, f"/shows/{tvmaze_id}/episodes", {"specials": 1})
             if resp.status_code == 404:
                 return None
             resp.raise_for_status()
@@ -62,6 +78,36 @@ async def get_episodes(tvmaze_id: int) -> list[dict] | None:
             return data if isinstance(data, list) else None
     except Exception as exc:
         logger.warning("TVMaze get_episodes failed for id=%d: %s", tvmaze_id, exc)
+        return None
+
+
+async def search_shows(query: str) -> list[dict] | None:
+    """Free-text show search; returns show dicts best-match first, None on error."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await _get_json(client, "/search/shows", {"q": query})
+            resp.raise_for_status()
+            return [r["show"] for r in resp.json() if isinstance(r, dict) and r.get("show")]
+    except Exception as exc:
+        logger.warning("TVMaze search_shows failed for %r: %s", query, exc)
+        return None
+
+
+async def get_schedule(date: str, country: str, web: bool = False) -> list[dict] | None:
+    """Episodes airing on ``date`` (YYYY-MM-DD) with the show embedded.
+
+    ``web`` selects streaming releases instead of broadcast TV.  None on error.
+    """
+    path = "/schedule/web" if web else "/schedule"
+    params = {"date": date, "country": country}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await _get_json(client, path, params)
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, list) else None
+    except Exception as exc:
+        logger.warning("TVMaze schedule failed (%s %s %s): %s", path, date, country, exc)
         return None
 
 

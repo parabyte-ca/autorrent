@@ -72,6 +72,11 @@ export interface WatchlistItem {
   preferred_groups?: string | null;
   prefer_season_packs?: boolean;
   profile_id?: number | null;
+  poster_url?: string | null;
+  summary?: string | null;
+  network?: string | null;
+  premiered?: string | null;
+  metadata_checked_at?: string | null;
 }
 
 export interface QualityProfile {
@@ -202,6 +207,76 @@ export interface WatchlistEpisode {
   torrent_name: string | null;
 }
 
+export type EpisodeStatus = "downloaded" | "missing" | "upcoming";
+
+export interface GuideEpisode {
+  number: number;
+  name: string;
+  airs_at: string | null;
+  status: EpisodeStatus;
+  torrent_name: string | null;
+}
+
+export interface GuideSeason {
+  season: number;
+  episodes: GuideEpisode[];
+  total: number;
+  aired: number;
+  downloaded: number;
+}
+
+export interface EpisodeGuide {
+  available: boolean;
+  pointer: { season: number; episode: number };
+  seasons: GuideSeason[];
+}
+
+export interface EpisodeSearchResult {
+  status: "started" | "not_found" | "already_downloaded" | "duplicate";
+  message: string;
+  title?: string;
+}
+
+export interface CalendarEntry {
+  watchlist_id: number;
+  title: string;
+  poster_url: string | null;
+  enabled: boolean;
+  season: number;
+  episode: number;
+  name: string;
+  airs_at: string;
+  status: EpisodeStatus;
+}
+
+export interface CalendarResponse {
+  entries: CalendarEntry[];
+  unmatched: number;
+}
+
+export interface BrowseShow {
+  tvmaze_id: number;
+  name: string;
+  poster_url: string | null;
+  network: string | null;
+  premiered: string | null;
+  status: string | null;
+  genres: string[];
+  rating: number | null;
+  summary: string | null;
+  next_airs: string | null;
+  next_episode: string | null;
+  season_premiere: boolean;
+  on_watchlist: boolean;
+  watchlist_id: number | null;
+}
+
+export interface BrowseResponse {
+  mode: "airing" | "search";
+  country: string;
+  shows: BrowseShow[];
+}
+
 export interface MarkEpisodeRequest {
   season: number;
   episode: number;
@@ -275,6 +350,13 @@ export const api = {
       reset: (id: number) =>
         req<{ deleted: number }>(`/watchlist/${id}/episodes?confirm=true`, { method: "DELETE" }),
     },
+    guide: (id: number) => req<EpisodeGuide>(`/watchlist/${id}/guide`),
+    searchEpisode: (id: number, season: number, episode: number) =>
+      req<EpisodeSearchResult>(`/watchlist/${id}/episodes/${season}/${episode}/search`, { method: "POST" }),
+    refreshMetadata: () =>
+      req<{ checked: number; matched: number; remaining: number }>("/watchlist/refresh-metadata", { method: "POST" }),
+    addFromTvmaze: (data: { tvmaze_id: number; start?: "next" | "beginning" }) =>
+      req<WatchlistItem>("/watchlist/from-tvmaze", { method: "POST", body: JSON.stringify(data) }),
     checkShowStatuses: () =>
       req<{ ok: boolean; message: string }>("/watchlist/check-show-statuses", { method: "POST" }),
     setOverride: (id: number) =>
@@ -308,6 +390,14 @@ export const api = {
     update: (id: number, data: Partial<{ name: string; path: string; is_default: boolean }>) =>
       req<DownloadPath>(`/paths/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
+  },
+
+  calendar: {
+    get: (days = 30, back = 7) => req<CalendarResponse>(`/calendar?days=${days}&back=${back}`),
+  },
+
+  browse: {
+    get: (q = "") => req<BrowseResponse>(`/browse${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   },
 
   profiles: {

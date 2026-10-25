@@ -12,7 +12,7 @@ from .database import SessionLocal
 from .migrations import run_migrations
 from .middleware.auth import AuthMiddleware
 from .models import Setting
-from .routers import auth, backup, downloads, health, history, paths, profiles, search, settings, updates, watchlist
+from .routers import auth, backup, browse, calendar, downloads, health, history, paths, profiles, search, settings, updates, watchlist
 from .services.scheduler import start_scheduler, stop_scheduler
 
 STATIC_DIR = pathlib.Path("/app/static")
@@ -60,6 +60,8 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(updates.router, prefix="/api")
 app.include_router(paths.router, prefix="/api")
 app.include_router(profiles.router, prefix="/api")
+app.include_router(calendar.router, prefix="/api")
+app.include_router(browse.router, prefix="/api")
 
 # Serve compiled React frontend (production)
 if STATIC_DIR.exists():

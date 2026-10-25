@@ -9,6 +9,8 @@ import Downloads from "./pages/Downloads";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import Updates from "./pages/Updates";
+import Browse from "./pages/Browse";
+import Calendar from "./pages/Calendar";
 import { api } from "./api/client";
 import { authStore } from "./auth";
 import { Loader2 } from "lucide-react";
@@ -58,6 +60,8 @@ export default function App() {
             <Route index element={<Navigate to="/search" replace />} />
             <Route path="/search" element={<Search />} />
             <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/calendar" element={<Calendar />} />
+            <Route path="/browse" element={<Browse />} />
             <Route path="/downloads" element={<Downloads />} />
             <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />

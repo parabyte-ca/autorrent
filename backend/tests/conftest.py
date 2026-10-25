@@ -11,3 +11,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 # behaviour mock the relevant functions directly.
 if "qbittorrentapi" not in sys.modules:
     sys.modules["qbittorrentapi"] = MagicMock()
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tvmaze(monkeypatch):
+    """Tests must never reach the real TVMaze API; an accidental call fails fast instead."""
+    from app.services import tvmaze
+
+    monkeypatch.setattr(tvmaze, "_BASE", "http://tvmaze.invalid")

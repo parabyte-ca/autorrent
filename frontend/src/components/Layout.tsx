@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowUpCircle,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -22,6 +23,7 @@ import { api } from "../api/client";
 const nav = [
   { to: "/search",    label: "Search",    icon: Search        },
   { to: "/watchlist", label: "Watchlist", icon: Tv            },
+  { to: "/calendar",  label: "Calendar",  icon: CalendarDays  },
   { to: "/downloads", label: "Downloads", icon: Download      },
   { to: "/history",   label: "History",   icon: Clock         },
   { to: "/settings",  label: "Settings",  icon: Settings      },
@@ -222,7 +224,7 @@ export default function Layout() {
             key={to}
             to={to}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium min-h-[52px] transition-colors ${
+              `flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium min-h-[52px] transition-colors ${
                 isActive
                   ? "text-blue-600 dark:text-blue-400"
                   : "text-gray-500 dark:text-gray-400"

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import threading
 from datetime import datetime, timezone
 
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import QualityProfile, WatchlistEpisode, WatchlistItem
 from ..schemas import (
+    AddFromTvmazeRequest,
     MarkEpisodeRequest,
     WatchlistCreate,
     WatchlistEpisodeOut,
@@ -15,7 +18,16 @@ from ..schemas import (
     WatchlistUpdate,
 )
 
+from ..models import Setting
+from ..services import episode_guide, show_metadata, tvmaze
+from ..services.calendar_view import build_guide
+from ..services.grab import grab_episode
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_ENRICH_TIMEOUT = 12  # seconds; metadata is cosmetic and must not stall adding a show
+_REFRESH_BATCH = 25
 
 
 def _require_profile(db: Session, profile_id: int | None) -> None:
@@ -29,13 +41,78 @@ def get_watchlist(db: Session = Depends(get_db)):
 
 
 @router.post("/watchlist", response_model=WatchlistOut, status_code=201)
-def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get_db)):
+async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get_db)):
     _require_profile(db, item.profile_id)
     db_item = WatchlistItem(**item.model_dump())
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
+    try:
+        await asyncio.wait_for(show_metadata.enrich_item(db_item), _ENRICH_TIMEOUT)
+        db.commit()
+        db.refresh(db_item)
+    except Exception as exc:  # timeout or lookup failure: the show is already saved
+        db.rollback()
+        logger.warning("Metadata enrichment skipped for %r: %s", db_item.title, exc)
     return db_item
+
+
+@router.post("/watchlist/from-tvmaze", response_model=WatchlistOut, status_code=201)
+async def add_from_tvmaze(body: AddFromTvmazeRequest, db: Session = Depends(get_db)):
+    """Add a show picked from Browse, starting at its next new episode or the beginning."""
+    if db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == body.tvmaze_id).first():
+        raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
+    show = await tvmaze.get_show(body.tvmaze_id)
+    if show is None:
+        raise HTTPException(status_code=404, detail="TVMaze could not find that show.")
+
+    if body.profile_id is not None:
+        _require_profile(db, body.profile_id)  # an explicit choice must exist
+        profile_id = body.profile_id
+    else:
+        # Fall back to the default profile, quietly ignoring one that was deleted.
+        profile_id = None
+        row = db.query(Setting).filter(Setting.key == "default_profile_id").first()
+        if row and row.value and row.value.isdigit():
+            if db.query(QualityProfile).filter(QualityProfile.id == int(row.value)).first():
+                profile_id = int(row.value)
+
+    episodes = await episode_guide.aget_episodes(body.tvmaze_id)
+    season, episode = show_metadata.starting_point(
+        episodes, show.get("status"), body.start,
+    )
+    name = show.get("name") or "Unknown show"
+    db_item = WatchlistItem(
+        title=name,
+        search_query=show_metadata.search_query_from_name(name),
+        season=season,
+        episode=episode,
+        profile_id=profile_id,
+    )
+    show_metadata.apply_show(db_item, show)
+    db_item.metadata_checked_at = datetime.now(timezone.utc)
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item
+
+
+@router.post("/watchlist/refresh-metadata")
+async def refresh_metadata(db: Session = Depends(get_db)):
+    """Fill in posters/blurbs for shows that have never been looked up."""
+    pending = (
+        db.query(WatchlistItem)
+        .filter(WatchlistItem.metadata_checked_at.is_(None))
+        .limit(_REFRESH_BATCH)
+        .all()
+    )
+    known = 0
+    for item in pending:
+        if await show_metadata.enrich_item(item):
+            known += 1
+        db.commit()
+    remaining = db.query(WatchlistItem).filter(WatchlistItem.metadata_checked_at.is_(None)).count()
+    return {"checked": len(pending), "matched": known, "remaining": remaining}
 
 
 @router.put("/watchlist/{item_id}", response_model=WatchlistOut)
@@ -69,6 +146,34 @@ async def trigger_show_status_check(db: Session = Depends(get_db)):
     from ..services.scheduler import _check_statuses_async
     await _check_statuses_async(db)
     return {"ok": True, "message": "Show status check complete"}
+
+
+@router.get("/watchlist/{item_id}/guide")
+async def get_episode_guide(item_id: int, db: Session = Depends(get_db)):
+    """Every known episode of the show: downloaded, missing, or still to air."""
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not item.tvmaze_id:
+        # Shows added before TVMaze matching existed: try once now.
+        await show_metadata.enrich_item(item)
+        db.commit()
+    return await build_guide(db, item)
+
+
+@router.post("/watchlist/{item_id}/episodes/{season}/{episode}/search")
+def search_single_episode(item_id: int, season: int, episode: int, db: Session = Depends(get_db)):
+    """Search for one specific episode right now and start downloading it."""
+    item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if season < 0 or episode < 1:
+        raise HTTPException(status_code=422, detail="Invalid season or episode")
+    try:
+        return grab_episode(db, item, season, episode)
+    except Exception as exc:
+        logger.error("Manual episode grab failed for %r S%02dE%02d: %s", item.title, season, episode, exc)
+        raise HTTPException(status_code=502, detail=f"Could not start the download: {exc}")
 
 
 @router.post("/watchlist/{item_id}/scan")
