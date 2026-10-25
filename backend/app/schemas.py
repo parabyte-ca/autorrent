@@ -171,6 +171,11 @@ class AddFromTvmazeRequest(BaseModel):
     profile_id: Optional[int] = None
 
 
+class TraktTestRequest(BaseModel):
+    client_id: str
+    username: str
+
+
 class JackettTestRequest(BaseModel):
     url: str
     api_key: str

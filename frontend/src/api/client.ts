@@ -277,6 +277,25 @@ export interface BrowseResponse {
   shows: BrowseShow[];
 }
 
+export interface TraktResult {
+  ok: boolean;
+  error: string | null;
+  at: string;
+  checked: number;
+  added: string[];
+  existing: number;
+  unmatched: string[];
+  deferred: number;
+}
+
+export interface TraktStatus {
+  configured: boolean;
+  enabled: boolean;
+  last_result: TraktResult | null;
+  seen_count: number;
+  max_new_per_run: number;
+}
+
 export interface MarkEpisodeRequest {
   season: number;
   episode: number;
@@ -390,6 +409,19 @@ export const api = {
     update: (id: number, data: Partial<{ name: string; path: string; is_default: boolean }>) =>
       req<DownloadPath>(`/paths/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
+  },
+
+  trakt: {
+    status: () => req<TraktStatus>("/trakt/status"),
+    test: (data: { client_id: string; username: string }) =>
+      req<{ ok: boolean; shows?: number; error?: string }>("/trakt/test", { method: "POST", body: JSON.stringify(data) }),
+    sync: () => req<TraktResult>("/trakt/sync", { method: "POST" }),
+    forgetHistory: () => req<{ ok: boolean; cleared: number }>("/trakt/seen", { method: "DELETE" }),
+  },
+
+  onboarding: {
+    status: () => req<{ needed: boolean }>("/onboarding/status"),
+    complete: () => req<{ ok: boolean }>("/onboarding/complete", { method: "POST" }),
   },
 
   calendar: {

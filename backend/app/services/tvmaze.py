@@ -81,6 +81,27 @@ async def get_episodes(tvmaze_id: int) -> list[dict] | None:
         return None
 
 
+async def lookup_show(imdb: str | None = None, thetvdb: int | str | None = None) -> dict | None:
+    """Find a show by external id (IMDb or TheTVDB); None if unknown or on error."""
+    if imdb:
+        params = {"imdb": imdb}
+    elif thetvdb:
+        params = {"thetvdb": str(thetvdb)}
+    else:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            resp = await _get_json(client, "/lookup/shows", params)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, dict) and data.get("id") else None
+    except Exception as exc:
+        logger.warning("TVMaze lookup failed for %s: %s", params, exc)
+        return None
+
+
 async def search_shows(query: str) -> list[dict] | None:
     """Free-text show search; returns show dicts best-match first, None on error."""
     try:

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
-import { api, type DownloadPath, type JackettTestResult, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { api, type DownloadPath, type JackettTestResult, type TraktResult, type TraktStatus, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 
 const FIELD = [
@@ -116,6 +116,15 @@ function PathModal({ initial, onClose, onSave }: {
       </div>
     </div>
   );
+}
+
+function describeTrakt(r: TraktResult): string {
+  const parts = [`${r.checked} on your Trakt watchlist`];
+  parts.push(r.added.length ? `added ${r.added.length} (${r.added.join(", ")})` : "nothing new to add");
+  if (r.existing) parts.push(`${r.existing} already tracked`);
+  if (r.unmatched.length) parts.push(`${r.unmatched.length} couldn't be matched on TVMaze (${r.unmatched.join(", ")})`);
+  if (r.deferred) parts.push(`${r.deferred} more waiting for the next sync`);
+  return parts.join(" · ");
 }
 
 // ── Quality profiles ──────────────────────────────────────────────────────────
@@ -389,6 +398,53 @@ export default function Settings() {
   }, []);
 
   const set = (k: string, v: string) => setSettings((s) => ({ ...s, [k]: v }));
+
+  const [trakt, setTrakt] = useState<TraktStatus | null>(null);
+  const [traktBusy, setTraktBusy] = useState<"test" | "sync" | "forget" | null>(null);
+  const [traktMsg, setTraktMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { api.trakt.status().then(setTrakt).catch(() => {}); }, []);
+
+  const saveTraktFields = () => api.settings.update({
+    trakt_enabled: settings.trakt_enabled ?? "false",
+    trakt_client_id: (settings.trakt_client_id ?? "").trim(),
+    trakt_username: (settings.trakt_username ?? "").trim(),
+    trakt_start: settings.trakt_start ?? "auto",
+  });
+  const testTrakt = async () => {
+    setTraktBusy("test");
+    setTraktMsg(null);
+    try {
+      const r = await api.trakt.test({
+        client_id: (settings.trakt_client_id ?? "").trim(), username: (settings.trakt_username ?? "").trim(),
+      });
+      setTraktMsg(r.ok
+        ? { ok: true, text: `Connected — ${r.shows} show${r.shows === 1 ? "" : "s"} on the watchlist.` }
+        : { ok: false, text: r.error ?? "Test failed." });
+    } catch (err) {
+      setTraktMsg({ ok: false, text: err instanceof Error ? err.message : "Test failed." });
+    } finally { setTraktBusy(null); }
+  };
+  const syncTrakt = async () => {
+    setTraktBusy("sync");
+    setTraktMsg(null);
+    try {
+      await saveTraktFields();   // the sync reads saved settings
+      const r = await api.trakt.sync();
+      setTraktMsg(r.ok ? { ok: true, text: describeTrakt(r) } : { ok: false, text: r.error ?? "Sync failed." });
+      setTrakt(await api.trakt.status());
+    } catch (err) {
+      setTraktMsg({ ok: false, text: err instanceof Error ? err.message : "Sync failed." });
+    } finally { setTraktBusy(null); }
+  };
+  const forgetTrakt = async () => {
+    if (!confirm("Forget which Trakt shows were already handled? The next sync will consider every show on your watchlist again, including ones you removed from AutoRrent.")) return;
+    setTraktBusy("forget");
+    try {
+      await api.trakt.forgetHistory();
+      setTrakt(await api.trakt.status());
+      setTraktMsg({ ok: true, text: "Sync history cleared." });
+    } finally { setTraktBusy(null); }
+  };
 
   const [jackettTesting, setJackettTesting] = useState(false);
   const [jackettResult, setJackettResult] = useState<JackettTestResult | null>(null);
@@ -733,6 +789,68 @@ export default function Settings() {
             defaultId={settings.default_profile_id ?? ""}
             onDefaultChange={(id) => set("default_profile_id", id)}
           />
+        </Section>
+
+        {/* Trakt */}
+        <Section title="Trakt Watchlist Sync">
+          <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+            Shows you add to your Trakt watchlist are added to AutoRrent automatically (checked every 6 hours).
+            Trakt has no push notifications for this, so AutoRrent polls it. You need a free API app:
+            create one at <span className="font-mono">trakt.tv/oauth/applications</span> (any name; redirect URI{" "}
+            <span className="font-mono">urn:ietf:wg:oauth:2.0:oob</span>) and paste its <em>Client ID</em> below.
+            Your watchlist must be public (Trakt → Settings → Privacy).
+          </p>
+          <CheckRow
+            label="Sync my Trakt watchlist automatically"
+            checked={(settings.trakt_enabled ?? "false") === "true"}
+            onChange={(v) => set("trakt_enabled", v ? "true" : "false")}
+          />
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <Field label="Client ID" value={settings.trakt_client_id ?? ""} onChange={(v) => set("trakt_client_id", v)} placeholder="64-character Trakt client ID" autoComplete="off" />
+            <Field label="Trakt username" value={settings.trakt_username ?? ""} onChange={(v) => set("trakt_username", v)} placeholder="your-username" autoComplete="off" />
+          </div>
+          <div className="mt-3 sm:max-w-xs">
+            <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">New shows start from</label>
+            <select value={settings.trakt_start ?? "auto"} onChange={(e) => set("trakt_start", e.target.value)} className={FIELD}>
+              <option value="auto">Automatic</option>
+              <option value="next">Next new episode</option>
+              <option value="beginning">The beginning</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Automatic starts at the next episode for shows still airing, and at the beginning for finished ones.
+            </p>
+          </div>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            To avoid flooding your downloads, at most {trakt?.max_new_per_run ?? 10} new shows are added per sync; the rest follow on the next one.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button onClick={testTrakt} disabled={traktBusy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50">
+              {traktBusy === "test" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Test connection
+            </button>
+            <button onClick={syncTrakt} disabled={traktBusy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50">
+              {traktBusy === "sync" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Sync now
+            </button>
+            {trakt && trakt.seen_count > 0 && (
+              <button onClick={forgetTrakt} disabled={traktBusy !== null}
+                className="rounded-lg px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400 hover:underline disabled:opacity-50">
+                Forget sync history ({trakt.seen_count})
+              </button>
+            )}
+          </div>
+          {traktMsg && (
+            <p className={`mt-2 flex items-start gap-1 text-sm ${traktMsg.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+              {traktMsg.ok ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
+              <span>{traktMsg.text}</span>
+            </p>
+          )}
+          {!traktMsg && trakt?.last_result && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              Last sync {new Date(trakt.last_result.at).toLocaleString()}:{" "}
+              {trakt.last_result.ok ? describeTrakt(trakt.last_result) : trakt.last_result.error}
+            </p>
+          )}
         </Section>
 
         {/* Discovery */}
