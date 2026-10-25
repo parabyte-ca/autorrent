@@ -39,6 +39,12 @@ MIGRATIONS: list[tuple[str, str | None]] = [
     ("ALTER TABLE watchlist ADD COLUMN network TEXT", None),
     ("ALTER TABLE watchlist ADD COLUMN premiered TEXT", None),
     ("ALTER TABLE watchlist ADD COLUMN metadata_checked_at DATETIME", None),
+    # Earlier versions stamped a show as "checked" even when TVMaze was merely
+    # unreachable or rate-limited; clear those stamps once so they are retried.
+    (
+        "ALTER TABLE watchlist ADD COLUMN metadata_attempts INTEGER DEFAULT 0",
+        "UPDATE watchlist SET metadata_checked_at = NULL WHERE poster_url IS NULL",
+    ),
 ]
 
 

@@ -27,6 +27,7 @@ router = APIRouter()
 
 _ENRICH_TIMEOUT = 12  # seconds; metadata is cosmetic and must not stall adding a show
 _REFRESH_BATCH = 25
+_REFRESH_PACING = 0.6  # seconds between shows; TVMaze allows ~20 calls per 10 s
 
 
 def _require_profile(db: Session, profile_id: int | None) -> None:
@@ -73,20 +74,30 @@ async def add_from_tvmaze(body: AddFromTvmazeRequest, db: Session = Depends(get_
 
 @router.post("/watchlist/refresh-metadata")
 async def refresh_metadata(db: Session = Depends(get_db)):
-    """Fill in posters/blurbs for shows that have never been looked up."""
-    pending = (
-        db.query(WatchlistItem)
-        .filter(WatchlistItem.metadata_checked_at.is_(None))
-        .limit(_REFRESH_BATCH)
-        .all()
-    )
-    known = 0
-    for item in pending:
-        if await show_metadata.enrich_item(item):
-            known += 1
+    """Find posters/blurbs for shows that have none and are due a lookup.
+
+    Paced to stay inside TVMaze's rate limit, and stops at the first sign it is
+    unavailable instead of hammering it; those shows stay due for the next call.
+    """
+    now = datetime.now(timezone.utc)
+    due = [
+        i for i in db.query(WatchlistItem).filter(WatchlistItem.poster_url.is_(None)).all()
+        if show_metadata.metadata_due(i, now)
+    ]
+    checked = matched = 0
+    unavailable = False
+    for n, item in enumerate(due[:_REFRESH_BATCH]):
+        if n:
+            await asyncio.sleep(_REFRESH_PACING)
+        result = await show_metadata.enrich_item(item)
+        if result == show_metadata.UNAVAILABLE:
+            unavailable = True
+            break
+        checked += 1
+        matched += result == show_metadata.FOUND
         db.commit()
-    remaining = db.query(WatchlistItem).filter(WatchlistItem.metadata_checked_at.is_(None)).count()
-    return {"checked": len(pending), "matched": known, "remaining": remaining}
+    return {"checked": checked, "matched": matched, "remaining": len(due) - checked,
+            "unavailable": unavailable}
 
 
 @router.put("/watchlist/{item_id}", response_model=WatchlistOut)

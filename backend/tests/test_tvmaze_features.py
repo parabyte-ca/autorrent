@@ -14,7 +14,7 @@ from app.database import Base, get_db
 from app.models import (
     Download, DownloadHistory, QualityProfile, Setting, WatchlistEpisode, WatchlistItem,
 )
-from app.services import browse, calendar_view, episode_guide, show_metadata
+from app.services import browse, calendar_view, episode_guide, show_metadata, tvmaze
 from app.services.grab import grab_episode
 
 NOW = datetime.now(timezone.utc)
@@ -138,30 +138,39 @@ class TestEnrichItem:
 
     def test_uses_cached_tvmaze_id_first(self, db):
         item = _item(db, tvmaze_id=5)
-        with patch("app.services.tvmaze.get_show", new=AsyncMock(return_value=tv_show(id=5))) as g, \
-             patch("app.services.tvmaze.search_show", new=AsyncMock()) as s:
-            assert self._run(item) is True
+        with patch("app.services.tvmaze.fetch_show", new=AsyncMock(return_value=tv_show(id=5))) as g, \
+             patch("app.services.tvmaze.lookup_by_name", new=AsyncMock()) as s:
+            assert self._run(item) == show_metadata.FOUND
         g.assert_awaited_once_with(5)
         s.assert_not_awaited()
-        assert item.metadata_checked_at is not None
+        assert item.metadata_checked_at is not None and item.metadata_attempts == 0
 
     def test_falls_back_to_search(self, db):
         item = _item(db, tvmaze_id=None)
-        with patch("app.services.tvmaze.search_show", new=AsyncMock(return_value=tv_show(id=7))):
-            assert self._run(item) is True
+        with patch("app.services.tvmaze.lookup_by_name", new=AsyncMock(return_value=tv_show(id=7))):
+            assert self._run(item) == show_metadata.FOUND
         assert item.tvmaze_id == 7
 
-    def test_unknown_show_still_marks_attempt(self, db):
+    def test_unknown_show_is_recorded_and_counted(self, db):
         item = _item(db, tvmaze_id=None)
-        with patch("app.services.tvmaze.search_show", new=AsyncMock(return_value=None)):
-            assert self._run(item) is False
+        with patch("app.services.tvmaze.lookup_by_name", new=AsyncMock(return_value=None)):
+            assert self._run(item) == show_metadata.NOT_FOUND
         assert item.metadata_checked_at is not None and item.poster_url is None
+        assert item.metadata_attempts == 1
 
-    def test_lookup_exception_is_swallowed(self, db):
+    def test_tvmaze_being_unavailable_is_not_remembered_as_not_found(self, db):
+        """The bug: a rate-limited lookup used to be stamped 'checked' and never retried."""
         item = _item(db, tvmaze_id=None)
-        with patch("app.services.tvmaze.search_show", new=AsyncMock(side_effect=RuntimeError("boom"))):
-            assert self._run(item) is False
-        assert item.metadata_checked_at is not None
+        unavailable = AsyncMock(side_effect=tvmaze.TVMazeUnavailable("HTTP 429"))
+        with patch("app.services.tvmaze.lookup_by_name", new=unavailable):
+            assert self._run(item) == show_metadata.UNAVAILABLE
+        assert item.metadata_checked_at is None and (item.metadata_attempts or 0) == 0
+
+    def test_unexpected_errors_are_swallowed_and_not_remembered(self, db):
+        item = _item(db, tvmaze_id=None)
+        with patch("app.services.tvmaze.lookup_by_name", new=AsyncMock(side_effect=RuntimeError("boom"))):
+            assert self._run(item) == show_metadata.UNAVAILABLE
+        assert item.metadata_checked_at is None
 
 
 class TestStartingPoint:
@@ -427,7 +436,7 @@ def api(db):
 
 class TestWatchlistEndpoints:
     def test_create_enriches_with_poster(self, api):
-        with patch("app.services.tvmaze.search_show", new=AsyncMock(return_value=tv_show(id=42))):
+        with patch("app.services.tvmaze.lookup_by_name", new=AsyncMock(return_value=tv_show(id=42))):
             r = api.post("/api/watchlist", json={"title": "Severance", "search_query": "Severance"})
         body = r.json()
         assert r.status_code == 201
@@ -435,33 +444,38 @@ class TestWatchlistEndpoints:
         assert body["network"] == "Apple TV+" and body["metadata_checked_at"]
 
     def test_create_survives_lookup_failure(self, api):
-        with patch("app.services.tvmaze.search_show", new=AsyncMock(side_effect=RuntimeError("down"))):
+        with patch("app.services.tvmaze.lookup_by_name", new=AsyncMock(side_effect=RuntimeError("down"))):
             r = api.post("/api/watchlist", json={"title": "X", "search_query": "X"})
         assert r.status_code == 201 and r.json()["poster_url"] is None
+        assert r.json()["metadata_checked_at"] is None   # will be retried
 
     def test_create_survives_timeout(self, api):
         async def slow(_q):
             await asyncio.sleep(5)
         with patch("app.routers.watchlist._ENRICH_TIMEOUT", 0.05), \
-             patch("app.services.tvmaze.search_show", new=slow):
+             patch("app.services.tvmaze.lookup_by_name", new=slow):
             r = api.post("/api/watchlist", json={"title": "X", "search_query": "X"})
         assert r.status_code == 201
         assert r.json()["metadata_checked_at"] is None   # will be retried by refresh
 
-    def test_refresh_metadata_only_touches_unchecked(self, api, db):
-        done = _item(db, title="Done", tvmaze_id=1, metadata_checked_at=NOW)
+    def test_refresh_metadata_only_touches_shows_that_are_due(self, api, db):
+        has_poster = _item(db, title="Done", tvmaze_id=1, poster_url="https://p/x.jpg", metadata_checked_at=NOW)
         a = _item(db, title="A", search_query="A", tvmaze_id=None)
         b = _item(db, title="B", search_query="B", tvmaze_id=None)
+        just_checked = _item(db, title="C", search_query="C", tvmaze_id=None,
+                             metadata_checked_at=datetime.now(timezone.utc), metadata_attempts=1)
 
         async def search(q):
             return tv_show(id=9, name=q) if q == "A" else None
-        with patch("app.services.tvmaze.search_show", new=search):
+        with patch("app.routers.watchlist._REFRESH_PACING", 0), \
+             patch("app.services.tvmaze.lookup_by_name", new=search):
             r = api.post("/api/watchlist/refresh-metadata")
-        assert r.json() == {"checked": 2, "matched": 1, "remaining": 0}
+        assert r.json() == {"checked": 2, "matched": 1, "remaining": 0, "unavailable": False}
         db.expire_all()
-        assert db.get(WatchlistItem, a.id).poster_url and not db.get(WatchlistItem, b.id).poster_url
-        assert db.get(WatchlistItem, b.id).metadata_checked_at is not None   # not retried forever
-        assert db.get(WatchlistItem, done.id).poster_url is None             # left alone
+        assert db.get(WatchlistItem, a.id).poster_url
+        assert db.get(WatchlistItem, b.id).metadata_checked_at is not None      # answered: not found
+        assert db.get(WatchlistItem, has_poster.id).poster_url == "https://p/x.jpg"
+        assert db.get(WatchlistItem, just_checked.id).metadata_attempts == 1    # backing off, untouched
 
     def test_guide_endpoint(self, api, db):
         w = _item(db)
@@ -472,7 +486,7 @@ class TestWatchlistEndpoints:
 
     def test_guide_tries_to_match_show_once_if_unmatched(self, api, db):
         w = _item(db, tvmaze_id=None)
-        with patch("app.services.tvmaze.search_show", new=AsyncMock(return_value=tv_show(id=10))), \
+        with patch("app.services.tvmaze.lookup_by_name", new=AsyncMock(return_value=tv_show(id=10))), \
              episodes_patch({10: [raw_ep(1, 1, at(days=-5))]}):
             g = api.get(f"/api/watchlist/{w.id}/guide").json()
         assert g["available"] is True

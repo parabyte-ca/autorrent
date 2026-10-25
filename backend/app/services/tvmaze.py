@@ -13,6 +13,13 @@ _STATUS_MAP = {
 }
 
 
+class TVMazeUnavailable(Exception):
+    """TVMaze could not answer (network error, rate limit, server error).
+
+    Distinct from "no such show": callers must not remember this as a negative result.
+    """
+
+
 async def _get_json(client: httpx.AsyncClient, path: str, params: dict | None = None):
     """GET from TVMaze, politely retrying when rate limited (HTTP 429)."""
     for attempt in range(3):
@@ -28,19 +35,52 @@ async def _get_json(client: httpx.AsyncClient, path: str, params: dict | None = 
     return resp
 
 
+async def _strict_get(path: str, params: dict | None = None, timeout: float = 10):
+    """GET JSON from TVMaze. None means a genuine 404; raises TVMazeUnavailable on any failure."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await _get_json(client, path, params)
+    except httpx.HTTPError as exc:
+        raise TVMazeUnavailable(str(exc) or type(exc).__name__) from exc
+    if resp.status_code == 404:
+        return None
+    if resp.status_code == 429 or resp.status_code >= 500:
+        raise TVMazeUnavailable(f"HTTP {resp.status_code}")
+    try:
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise TVMazeUnavailable(str(exc) or type(exc).__name__) from exc
+
+
+async def lookup_by_name(title: str) -> dict | None:
+    """Best fuzzy match for a title; None only if TVMaze has no match. Raises TVMazeUnavailable."""
+    data = await _strict_get("/singlesearch/shows", {"q": title})
+    return data if isinstance(data, dict) and data.get("id") else None
+
+
+async def lookup_many(title: str) -> list[dict]:
+    """All matches for a title, best first. Raises TVMazeUnavailable."""
+    data = await _strict_get("/search/shows", {"q": title})
+    if not isinstance(data, list):
+        return []
+    return [r["show"] for r in data if isinstance(r, dict) and r.get("show")]
+
+
+async def fetch_show(tvmaze_id: int) -> dict | None:
+    """A show by TVMaze id; None only if it does not exist. Raises TVMazeUnavailable."""
+    data = await _strict_get(f"/shows/{tvmaze_id}")
+    return data if isinstance(data, dict) and data.get("id") else None
+
+
 async def search_show(title: str) -> dict | None:
     """Search TVMaze for the best-matching show by title.
 
     Returns the show dict on success, None if not found or on error.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{_BASE}/singlesearch/shows", params={"q": title})
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as exc:
+        return await lookup_by_name(title)
+    except TVMazeUnavailable as exc:
         logger.warning("TVMaze search failed for %r: %s", title, exc)
         return None
 
@@ -51,13 +91,8 @@ async def get_show(tvmaze_id: int) -> dict | None:
     Returns the show dict on success, None if not found or on error.
     """
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(f"{_BASE}/shows/{tvmaze_id}")
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
-    except Exception as exc:
+        return await fetch_show(tvmaze_id)
+    except TVMazeUnavailable as exc:
         logger.warning("TVMaze get_show failed for id=%d: %s", tvmaze_id, exc)
         return None
 

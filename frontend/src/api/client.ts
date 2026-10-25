@@ -373,7 +373,7 @@ export const api = {
     searchEpisode: (id: number, season: number, episode: number) =>
       req<EpisodeSearchResult>(`/watchlist/${id}/episodes/${season}/${episode}/search`, { method: "POST" }),
     refreshMetadata: () =>
-      req<{ checked: number; matched: number; remaining: number }>("/watchlist/refresh-metadata", { method: "POST" }),
+      req<{ checked: number; matched: number; remaining: number; unavailable: boolean }>("/watchlist/refresh-metadata", { method: "POST" }),
     addFromTvmaze: (data: { tvmaze_id: number; start?: "next" | "beginning" }) =>
       req<WatchlistItem>("/watchlist/from-tvmaze", { method: "POST", body: JSON.stringify(data) }),
     checkShowStatuses: () =>

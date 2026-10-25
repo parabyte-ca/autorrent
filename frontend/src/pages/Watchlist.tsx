@@ -342,7 +342,7 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
 
   return (
     <div
-      className={`rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm transition-opacity ${item.enabled ? "" : "opacity-60"}`}
+      className={`min-w-0 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 shadow-sm transition-opacity ${item.enabled ? "" : "opacity-60"}`}
     >
       {/* Ended alert banner */}
       {item.show_status === "Ended" && !item.enabled && (
@@ -381,7 +381,7 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
           <Poster url={item.poster_url} title={item.title} className="h-16 w-11" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight">{item.title}</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 leading-tight [overflow-wrap:anywhere]">{item.title}</h3>
               <ShowStatusBadge status={item.show_status} />
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -389,7 +389,7 @@ function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSele
               {item.network ? ` · ${item.network}` : ""}
             </p>
             {item.summary && (
-              <p className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500">{item.summary}</p>
+              <p className="mt-1 line-clamp-2 text-xs text-gray-400 dark:text-gray-500 [overflow-wrap:anywhere]">{item.summary}</p>
             )}
           </div>
         </div>
@@ -653,14 +653,29 @@ export default function Watchlist() {
 
   useEffect(() => { load(); }, []);
 
-  // Shows added before posters existed (or whose lookup timed out) get filled in
-  // once, in the background; the list refreshes only if something changed.
+  // Find posters for shows that have none: in rounds (the server paces itself to
+  // stay inside TVMaze's rate limit), stopping when everything has been tried or
+  // TVMaze is unavailable. Shows it can't match are retried later, not every load.
   useEffect(() => {
-    if (loading || !items.some((i) => !i.metadata_checked_at)) return;
+    if (loading || !items.some((i) => !i.poster_url)) return;
     let cancelled = false;
-    api.watchlist.refreshMetadata()
-      .then((r) => { if (!cancelled && r.checked > 0) api.watchlist.list().then((w) => !cancelled && setItems(w)); })
-      .catch(() => {});
+    (async () => {
+      for (let round = 0; round < 8 && !cancelled; round++) {
+        const r = await api.watchlist.refreshMetadata().catch(() => null);
+        if (!r || cancelled) return;
+        if (r.matched > 0) {
+          const w = await api.watchlist.list().catch(() => null);
+          if (w && !cancelled) setItems(w);
+        }
+        if (r.remaining === 0) return;
+        if (r.unavailable) {
+          // Rate-limited or briefly down: wait out TVMaze's 10-second window, then carry on.
+          await new Promise((resolve) => setTimeout(resolve, 10_000));
+        } else if (r.checked === 0) {
+          return;
+        }
+      }
+    })();
     return () => { cancelled = true; };
   }, [loading]);
 
@@ -751,14 +766,14 @@ export default function Watchlist() {
 
   return (
     <div className="px-4 py-6 sm:px-6">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Watchlist</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             AutoRrent scans these shows and downloads new episodes automatically.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {items.length > 0 && (
             <label className="flex min-h-[40px] items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 text-sm text-gray-600 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800">
               <input
@@ -774,21 +789,21 @@ export default function Watchlist() {
           <button
             onClick={() => handleScan()}
             disabled={scanning !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
           >
             {scanning === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Scan all
           </button>
           <Link
             to="/browse"
-            className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
           >
             <Search className="h-4 w-4" />
             Browse
           </Link>
           <button
             onClick={() => setModal(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Plus className="h-4 w-4" />
             Add show
