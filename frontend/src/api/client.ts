@@ -71,6 +71,30 @@ export interface WatchlistItem {
   max_size_mb?: number | null;
   preferred_groups?: string | null;
   prefer_season_packs?: boolean;
+  profile_id?: number | null;
+}
+
+export interface QualityProfile {
+  id: number;
+  name: string;
+  quality: string;
+  codec: string;
+  max_size_mb: number | null;
+  preferred_groups: string | null;
+  prefer_season_packs: boolean;
+  fallback_quality: string | null;
+  fallback_after_hours: number;
+  watchlist_count: number;
+}
+
+export type ProfileInput = Omit<QualityProfile, "id" | "watchlist_count">;
+
+export interface JackettTestResult {
+  ok: boolean;
+  kind?: string;
+  version?: string | null;
+  indexers?: number;
+  error?: string;
 }
 
 export interface WatchlistCreate {
@@ -85,6 +109,7 @@ export interface WatchlistCreate {
   max_size_mb?: number | null;
   preferred_groups?: string | null;
   prefer_season_packs?: boolean;
+  profile_id?: number | null;
 }
 
 export interface Download {
@@ -285,6 +310,16 @@ export const api = {
     delete: (id: number) => req(`/paths/${id}`, { method: "DELETE" }),
   },
 
+  profiles: {
+    list: () => req<QualityProfile[]>("/profiles"),
+    create: (data: ProfileInput) =>
+      req<QualityProfile>("/profiles", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: number, data: Partial<ProfileInput>) =>
+      req<QualityProfile>(`/profiles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (id: number) =>
+      req<{ ok: boolean; detached: number }>(`/profiles/${id}`, { method: "DELETE" }),
+  },
+
   backup: {
     /** Fetch the export ZIP; returns the raw Response so the caller can stream
      *  the blob — do not pass through req<T>() which calls .json(). */
@@ -326,6 +361,8 @@ export const api = {
       req<{ success: boolean; message: string }>("/settings/test-qbit", { method: "POST" }),
     testPlex: (data: { url: string; token: string; library_key?: string }) =>
       req<PlexTestResult>("/settings/test-plex", { method: "POST", body: JSON.stringify(data) }),
+    testJackett: (data: { url: string; api_key: string }) =>
+      req<JackettTestResult>("/settings/test-jackett", { method: "POST", body: JSON.stringify(data) }),
     testJellyfin: (data: { url: string; api_key: string }) =>
       req<JellyfinTestResult>("/settings/test-jellyfin", { method: "POST", body: JSON.stringify(data) }),
     testDigest: (data: {

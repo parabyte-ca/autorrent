@@ -22,8 +22,10 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
     from ..database import SessionLocal
     from ..models import Download, DownloadHistory, DownloadPath, Setting, WatchlistEpisode, WatchlistItem
     from .apprise_notify import notify
+    from . import episode_guide
     from .candidates import (
-        WATCHLIST_LOCK, failed_hashes, find_candidates, query_words, title_has_query_word,
+        WATCHLIST_LOCK, effective_item, failed_hashes, failed_titles, find_with_fallback,
+        parse_episode_tag, query_words, title_has_query_word,
     )
     from .indexers import search_all
     from .qbittorrent import add_torrent
@@ -72,20 +74,42 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
 
                 ep_tag = f"S{item.season:02d}E{item.episode:02d}"
                 words = query_words(item.search_query)
-                results = find_candidates(
-                    item, item.season, item.episode, min_seeds,
+                eff = effective_item(db, item)
+                results = find_with_fallback(
+                    eff, item.season, item.episode, min_seeds,
                     failed_hashes(db, item.id, item.season, item.episode),
+                    failed_titles(db, item.id, item.season, item.episode),
                 )
 
                 # Season pack: if enabled, also search for a full-season torrent
                 # and prefer it over a single episode when one is found.
                 use_pack = False
-                if item.prefer_season_packs:
+                pack_ok = False
+                if eff.prefer_season_packs:
+                    # A pack only exists once the season has finished airing, so
+                    # skip the extra search while TVMaze says it is still running.
+                    # Unknown (no TVMaze data) keeps the old behaviour: look anyway.
+                    complete = episode_guide.season_complete(item.tvmaze_id, item.season)
+                    try:
+                        max_attempts = int(settings.get("retry_max_attempts", "3"))
+                    except ValueError:
+                        max_attempts = 3
+                    # After repeated failed packs, stop preferring packs and fall
+                    # back to grabbing episodes individually.
+                    pack_failures = sum(
+                        1 for d in db.query(Download).filter(
+                            Download.watchlist_id == item.id,
+                            Download.status.in_(["failed", "error"]),
+                        ).all()
+                        if parse_episode_tag(d.title) is None
+                    )
+                    pack_ok = complete is not False and pack_failures < max_attempts
+                if pack_ok:
                     pack_query = f"{item.search_query} S{item.season:02d}"
                     pack_results = search_all(
                         pack_query,
-                        quality=item.quality,
-                        codec=item.codec or "x265",
+                        quality=eff.quality,
+                        codec=eff.codec or "x265",
                         filter_adult=True,
                     )
                     pack_results = [r for r in pack_results if r["seeds"] >= min_seeds]
@@ -95,8 +119,15 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                     pack_results = [
                         r for r in pack_results if title_has_query_word(r["title"], words)
                     ]
-                    if item.max_size_mb:
-                        max_bytes = item.max_size_mb * 1024 * 1024
+                    bad_hashes = failed_hashes(db, item.id)
+                    bad_titles = failed_titles(db, item.id)
+                    pack_results = [
+                        r for r in pack_results
+                        if r["title"].lower() not in bad_titles
+                        and (r.get("info_hash") or "").lower() not in bad_hashes
+                    ]
+                    if eff.max_size_mb:
+                        max_bytes = eff.max_size_mb * 1024 * 1024
                         pack_results = [r for r in pack_results if r.get("size_bytes", 0) <= max_bytes]
                     if pack_results:
                         best_pack = max(pack_results, key=lambda r: r["seeds"])
@@ -171,31 +202,44 @@ def scan_watchlist(target_item_id: int | None = None) -> None:
                 )
                 db.add(dl)
 
+                # A pack covers every aired episode of the season; record them all so
+                # the scanner and the episode guide treat the season as done.
                 if use_pack:
-                    # Season pack downloaded — skip to episode 99 so the scanner
-                    # doesn't try to download individual episodes for this season.
-                    item.episode = 99
+                    recorded_numbers = (
+                        episode_guide.aired_episode_numbers(item.tvmaze_id, downloaded_season)
+                        or [downloaded_episode]
+                    )
+                    item.season += 1
+                    item.episode = 1
                 else:
+                    recorded_numbers = [downloaded_episode]
                     item.episode += 1
                 item.last_found = datetime.now(timezone.utc)
                 db.commit()
 
-                # Record the episode as downloaded — best-effort, must not block the scan.
+                # Record the episode(s) as downloaded — best-effort, must not block the scan.
                 try:
-                    ep = WatchlistEpisode(
-                        watchlist_id=item.id,
-                        season=downloaded_season,
-                        episode=downloaded_episode,
-                        torrent_hash=info_hash,
-                        torrent_name=best["title"],
-                    )
-                    db.add(ep)
+                    have = {
+                        e.episode for e in db.query(WatchlistEpisode).filter_by(
+                            watchlist_id=item.id, season=downloaded_season
+                        )
+                    }
+                    for number in recorded_numbers:
+                        if number in have:
+                            continue
+                        db.add(WatchlistEpisode(
+                            watchlist_id=item.id,
+                            season=downloaded_season,
+                            episode=number,
+                            torrent_hash=info_hash,
+                            torrent_name=best["title"],
+                        ))
                     db.commit()
                 except IntegrityError:
                     db.rollback()
                     logger.warning(
-                        "WatchlistEpisode duplicate skipped: watchlist_id=%d S%02dE%02d",
-                        item.id, downloaded_season, downloaded_episode,
+                        "WatchlistEpisode duplicate skipped: watchlist_id=%d S%02d",
+                        item.id, downloaded_season,
                     )
                 except Exception as ep_err:
                     logger.error("Failed to write WatchlistEpisode: %s", ep_err)

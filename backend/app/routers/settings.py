@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import Setting
-from ..schemas import DigestTestRequest, JellyfinTestRequest, PlexTestRequest
+from ..schemas import DigestTestRequest, JackettTestRequest, JellyfinTestRequest, PlexTestRequest
+from ..services.indexers.jackett import probe_jackett
 from ..services.qbittorrent import test_connection
 from ..services.scheduler import reschedule_digest, update_interval
 
@@ -37,6 +38,7 @@ DEFAULTS: dict[str, str] = {
     "retry_max_attempts": "3",
     "low_disk_warn_gb": "10",
     "default_indexer": "all",
+    "default_profile_id": "",
     # Plex
     "plex_enabled": "false",
     "plex_url": "",
@@ -124,6 +126,14 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
 def test_qbit(db: Session = Depends(get_db)):
     success, message = test_connection()
     return {"success": success, "message": message}
+
+
+@router.post("/settings/test-jackett")
+def test_jackett_endpoint(body: JackettTestRequest):
+    """Probe a Prowlarr or Jackett instance using the values currently in the form."""
+    if not body.url.strip() or not body.api_key.strip():
+        return {"ok": False, "error": "Enter both the URL and the API key first."}
+    return probe_jackett(body.url.strip(), body.api_key.strip())
 
 
 @router.post("/settings/test-plex")

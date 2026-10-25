@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Download, Edit2, FolderOpen, Loader2, Plus, Save, Star, Trash2, Upload } from "lucide-react";
-import { api, type DownloadPath, type JellyfinTestResult, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
+import { api, type DownloadPath, type JackettTestResult, type JellyfinTestResult, type ProfileInput, type QualityProfile, type PlexLibrary, type PlexTestResult, type RestoreResponse, type Settings as SettingsType } from "../api/client";
 import { authStore } from "../auth";
 
 const FIELD = [
@@ -118,6 +118,206 @@ function PathModal({ initial, onClose, onSave }: {
   );
 }
 
+// ── Quality profiles ──────────────────────────────────────────────────────────
+
+const PROFILE_QUALITIES = ["4K", "1080p", "720p", "480p", "Any"];
+const PROFILE_CODECS = ["x265", "x264", "AV1", "Any"];
+
+const EMPTY_PROFILE: ProfileInput = {
+  name: "", quality: "1080p", codec: "x265", max_size_mb: null, preferred_groups: null,
+  prefer_season_packs: false, fallback_quality: null, fallback_after_hours: 24,
+};
+
+function ProfileModal({ initial, onClose, onSave }: {
+  initial?: QualityProfile;
+  onClose: () => void;
+  onSave: (data: ProfileInput) => Promise<void>;
+}) {
+  const [form, setForm] = useState<ProfileInput>(
+    initial
+      ? {
+          name: initial.name, quality: initial.quality, codec: initial.codec,
+          max_size_mb: initial.max_size_mb, preferred_groups: initial.preferred_groups,
+          prefer_season_packs: initial.prefer_season_packs,
+          fallback_quality: initial.fallback_quality, fallback_after_hours: initial.fallback_after_hours,
+        }
+      : EMPTY_PROFILE,
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = <K extends keyof ProfileInput>(k: K, v: ProfileInput[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({ ...form, name: form.name.trim() });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save profile.");
+      setSaving(false);
+    }
+  };
+
+  const label = "mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+        <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-gray-100">
+          {initial ? "Edit profile" : "New quality profile"}
+        </h2>
+        <div className="space-y-3">
+          <Field label="Name" value={form.name} onChange={(v) => set("name", v)} placeholder="e.g. Prestige 4K" />
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className={label}>Quality</label>
+              <select value={form.quality} onChange={(e) => set("quality", e.target.value)} className={FIELD}>
+                {PROFILE_QUALITIES.map((q) => <option key={q}>{q}</option>)}
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className={label}>Codec</label>
+              <select value={form.codec} onChange={(e) => set("codec", e.target.value)} className={FIELD}>
+                {PROFILE_CODECS.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={label}>Max size (MB) <span className="text-xs font-normal text-gray-400">optional</span></label>
+            <input type="number" min={1} value={form.max_size_mb ?? ""} placeholder="e.g. 4000"
+              onChange={(e) => set("max_size_mb", e.target.value ? Number(e.target.value) : null)} className={FIELD} />
+          </div>
+          <Field label="Preferred release groups" hint="Comma-separated, in priority order." value={form.preferred_groups ?? ""}
+            onChange={(v) => set("preferred_groups", v || null)} placeholder="e.g. FLUX, NTb" />
+          <CheckRow label="Prefer season packs"
+            hint="Grab a whole season at once when the season has finished airing."
+            checked={form.prefer_season_packs} onChange={(v) => set("prefer_season_packs", v)} />
+          <div className="rounded-lg border border-gray-100 dark:border-gray-800 p-3">
+            <label className={label}>Fall back to</label>
+            <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
+              If nothing is found at the quality above, settle for this once the episode has been out a while.
+            </p>
+            <div className="flex gap-3">
+              <select value={form.fallback_quality ?? ""} className={FIELD}
+                onChange={(e) => set("fallback_quality", e.target.value || null)}>
+                <option value="">No fallback</option>
+                {PROFILE_QUALITIES.filter((q) => q !== form.quality).map((q) => <option key={q}>{q}</option>)}
+              </select>
+              {form.fallback_quality && (
+                <div className="flex w-40 shrink-0 items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  after
+                  <input type="number" min={1} value={form.fallback_after_hours} className={FIELD}
+                    onChange={(e) => set("fallback_after_hours", Math.max(1, Number(e.target.value) || 1))} />
+                  h
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {error && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <div className="mt-5 flex gap-3">
+          <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
+            Cancel
+          </button>
+          <button onClick={submit} disabled={!form.name.trim() || saving}
+            className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            {saving ? "Saving…" : initial ? "Save changes" : "Create profile"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfilesSection({ defaultId, onDefaultChange }: {
+  defaultId: string;
+  onDefaultChange: (id: string) => void;
+}) {
+  const [profiles, setProfiles] = useState<QualityProfile[] | null>(null);
+  const [modal, setModal] = useState<QualityProfile | true | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () => api.profiles.list().then(setProfiles).catch(() => setProfiles([]));
+  useEffect(() => { load(); }, []);
+
+  const save = async (data: ProfileInput) => {
+    if (modal === true) await api.profiles.create(data);
+    else if (modal) await api.profiles.update(modal.id, data);
+    setModal(null);
+    load();
+  };
+
+  const remove = async (p: QualityProfile) => {
+    const used = p.watchlist_count
+      ? ` ${p.watchlist_count} show${p.watchlist_count === 1 ? "" : "s"} use it and will keep its settings as their own.`
+      : "";
+    if (!confirm(`Delete profile "${p.name}"?${used}`)) return;
+    try {
+      await api.profiles.delete(p.id);
+      if (String(p.id) === defaultId) onDefaultChange("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete profile.");
+    }
+  };
+
+  return (
+    <>
+      <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+        Reusable download preferences — for example "4K, fall back to 1080p after a day" — that you can assign to
+        any show. Editing a profile updates every show using it.
+      </p>
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <div className="min-w-0 flex-1 sm:max-w-xs">
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Default for new shows</label>
+          <select value={defaultId} onChange={(e) => onDefaultChange(e.target.value)} className={FIELD}>
+            <option value="">None (custom settings)</option>
+            {(profiles ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <button onClick={() => setModal(true)}
+          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          <Plus className="h-4 w-4" /> Add profile
+        </button>
+      </div>
+      {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {profiles === null ? (
+        <Loader2 className="mx-auto h-5 w-5 animate-spin text-gray-400" />
+      ) : profiles.length === 0 ? (
+        <div className="rounded-lg border-2 border-dashed border-gray-200 dark:border-gray-700 py-6 text-center text-sm text-gray-400 dark:text-gray-600">
+          No profiles yet.
+        </div>
+      ) : (
+        <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+          {profiles.map((p) => (
+            <li key={p.id} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{p.name}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {[p.quality, p.codec,
+                    p.max_size_mb ? `max ${p.max_size_mb} MB` : null,
+                    p.prefer_season_packs ? "season packs" : null,
+                    p.fallback_quality ? `→ ${p.fallback_quality} after ${p.fallback_after_hours}h` : null,
+                  ].filter(Boolean).join(" · ")}
+                  {" · "}used by {p.watchlist_count} show{p.watchlist_count === 1 ? "" : "s"}
+                </p>
+              </div>
+              <button onClick={() => setModal(p)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800">
+                <Edit2 className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => remove(p)} className="rounded-lg p-1.5 text-gray-400 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {modal !== null && (
+        <ProfileModal initial={modal === true ? undefined : modal} onClose={() => setModal(null)} onSave={save} />
+      )}
+    </>
+  );
+}
+
 // ── Section card ──────────────────────────────────────────────────────────────
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -189,6 +389,22 @@ export default function Settings() {
   }, []);
 
   const set = (k: string, v: string) => setSettings((s) => ({ ...s, [k]: v }));
+
+  const [jackettTesting, setJackettTesting] = useState(false);
+  const [jackettResult, setJackettResult] = useState<JackettTestResult | null>(null);
+  const testJackett = async () => {
+    setJackettTesting(true);
+    setJackettResult(null);
+    try {
+      setJackettResult(await api.settings.testJackett({
+        url: settings.jackett_url ?? "", api_key: settings.jackett_api_key ?? "",
+      }));
+    } catch (err) {
+      setJackettResult({ ok: false, error: err instanceof Error ? err.message : "Test failed." });
+    } finally {
+      setJackettTesting(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -491,6 +707,32 @@ export default function Settings() {
             <Field label="URL" value={settings.jackett_url ?? ""} onChange={(v) => set("jackett_url", v)} placeholder="http://localhost:9117" />
             <Field label="API Key" value={settings.jackett_api_key ?? ""} onChange={(v) => set("jackett_api_key", v)} placeholder="your-api-key" />
           </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              onClick={testJackett}
+              disabled={jackettTesting}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              {jackettTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Test connection
+            </button>
+            {jackettResult && (
+              <span className={`flex items-center gap-1 text-sm ${jackettResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {jackettResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                {jackettResult.ok
+                  ? `Connected to ${jackettResult.kind}${jackettResult.version ? ` ${jackettResult.version}` : ""} — ${jackettResult.indexers} indexer${jackettResult.indexers === 1 ? "" : "s"} enabled`
+                  : jackettResult.error}
+              </span>
+            )}
+          </div>
+        </Section>
+
+        {/* Quality profiles */}
+        <Section title="Quality Profiles">
+          <ProfilesSection
+            defaultId={settings.default_profile_id ?? ""}
+            onDefaultChange={(id) => set("default_profile_id", id)}
+          />
         </Section>
 
         {/* Plex */}

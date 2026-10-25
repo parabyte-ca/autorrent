@@ -46,6 +46,25 @@ async def get_show(tvmaze_id: int) -> dict | None:
         return None
 
 
+async def get_episodes(tvmaze_id: int) -> list[dict] | None:
+    """Fetch every episode of a show (specials included) from TVMaze.
+
+    Returns None on any network/API error so callers can tell "unknown" apart
+    from "the show has no episodes".
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(f"{_BASE}/shows/{tvmaze_id}/episodes", params={"specials": 1})
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, list) else None
+    except Exception as exc:
+        logger.warning("TVMaze get_episodes failed for id=%d: %s", tvmaze_id, exc)
+        return None
+
+
 async def get_show_status(title: str, tvmaze_id: int | None = None) -> tuple[str, int | None]:
     """Return (status_string, tvmaze_id) for the named show.
 
