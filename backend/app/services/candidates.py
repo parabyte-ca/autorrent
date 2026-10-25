@@ -3,10 +3,14 @@
 Shared by the watchlist scanner and the retry queue so both pick releases by
 exactly the same rules.
 """
+import logging
 import re
 import threading
+from types import SimpleNamespace
 
 from .qbittorrent import _hash_from_magnet
+
+logger = logging.getLogger(__name__)
 
 # Serialises scanner and retry-queue work on watchlist items so the two
 # background jobs can never grab the same episode twice.
@@ -42,21 +46,63 @@ def parse_episode_tag(title: str) -> tuple[int, int] | None:
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
-def failed_hashes(db, watchlist_id: int, season: int, episode: int) -> set[str]:
-    """Info-hashes of failed/stalled attempts at this episode — never re-grab them."""
+def _failed_downloads(db, watchlist_id: int, season: int | None, episode: int | None):
     from ..models import Download
 
-    tag = f"S{season:02d}E{episode:02d}"
-    rows = (
-        db.query(Download)
-        .filter(
-            Download.watchlist_id == watchlist_id,
-            Download.title.ilike(f"%{tag}%"),
-            Download.status.in_(["failed", "error"]),
-        )
-        .all()
+    q = db.query(Download).filter(
+        Download.watchlist_id == watchlist_id,
+        Download.status.in_(["failed", "error"]),
     )
-    return {r.torrent_hash.lower() for r in rows if r.torrent_hash}
+    if season is not None and episode is not None:
+        q = q.filter(Download.title.ilike(f"%S{season:02d}E{episode:02d}%"))
+    return q.all()
+
+
+def failed_hashes(db, watchlist_id: int, season: int | None = None,
+                  episode: int | None = None) -> set[str]:
+    """Info-hashes of failed/stalled attempts — never re-grab them.
+
+    With season+episode, only attempts at that episode; without, every failed
+    attempt for the item (used to avoid re-grabbing a failed season pack).
+    """
+    return {
+        r.torrent_hash.lower()
+        for r in _failed_downloads(db, watchlist_id, season, episode) if r.torrent_hash
+    }
+
+
+def failed_titles(db, watchlist_id: int, season: int | None = None,
+                  episode: int | None = None) -> set[str]:
+    """Titles of failed attempts; backs up the hash check for URL-only results."""
+    return {r.title.lower() for r in _failed_downloads(db, watchlist_id, season, episode)}
+
+
+def effective_item(db, item):
+    """The download preferences actually used for ``item``.
+
+    When the item has a quality profile, the profile's values override the
+    item's own quality/codec/size/groups/season-pack fields.  Returns a plain
+    namespace so the real ORM row is never mutated by accident.
+    """
+    from ..models import QualityProfile
+
+    profile = None
+    if getattr(item, "profile_id", None):
+        profile = db.query(QualityProfile).filter(QualityProfile.id == item.profile_id).first()
+    src = profile or item
+    return SimpleNamespace(
+        id=item.id,
+        title=item.title,
+        search_query=item.search_query,
+        tvmaze_id=item.tvmaze_id,
+        quality=src.quality,
+        codec=src.codec,
+        max_size_mb=src.max_size_mb,
+        preferred_groups=src.preferred_groups,
+        prefer_season_packs=bool(src.prefer_season_packs),
+        fallback_quality=getattr(profile, "fallback_quality", None) if profile else None,
+        fallback_after_hours=getattr(profile, "fallback_after_hours", 24) if profile else 24,
+    )
 
 
 def find_candidates(
@@ -65,6 +111,7 @@ def find_candidates(
     episode: int,
     min_seeds: int,
     exclude_hashes: set[str] | frozenset[str] = frozenset(),
+    exclude_titles: set[str] | frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Return acceptable releases for S{season}E{episode}, best first."""
     from .indexers import search_all
@@ -90,6 +137,8 @@ def find_candidates(
 
     if exclude_hashes:
         results = [r for r in results if result_hash(r) not in exclude_hashes]
+    if exclude_titles:
+        results = [r for r in results if r["title"].lower() not in exclude_titles]
 
     preferred = [
         g.strip().lower()
@@ -105,3 +154,35 @@ def find_candidates(
         return 0
 
     return sorted(results, key=lambda r: (group_score(r), r["seeds"]), reverse=True)
+
+
+def find_with_fallback(
+    item,
+    season: int,
+    episode: int,
+    min_seeds: int,
+    exclude_hashes: set[str] | frozenset[str] = frozenset(),
+    exclude_titles: set[str] | frozenset[str] = frozenset(),
+) -> list[dict]:
+    """find_candidates, then the profile's fallback quality once the episode is old enough.
+
+    ``item`` must come from :func:`effective_item`.  The fallback only applies
+    when TVMaze tells us the episode aired at least ``fallback_after_hours`` ago;
+    with no air date we never lower quality.
+    """
+    results = find_candidates(item, season, episode, min_seeds, exclude_hashes, exclude_titles)
+    if results or not item.fallback_quality or item.fallback_quality == item.quality:
+        return results
+
+    from . import episode_guide
+
+    age = episode_guide.episode_age_hours(item.tvmaze_id, season, episode)
+    if age is None or age < item.fallback_after_hours:
+        return results
+
+    fallback = SimpleNamespace(**{**vars(item), "quality": item.fallback_quality})
+    results = find_candidates(fallback, season, episode, min_seeds, exclude_hashes, exclude_titles)
+    if results:
+        logger.info("%s S%02dE%02d: nothing at %s after %.0fh — using fallback %s",
+                    item.title, season, episode, item.quality, age, item.fallback_quality)
+    return results

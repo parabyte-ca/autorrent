@@ -30,12 +30,32 @@ class WatchlistItem(Base):
     preferred_groups = Column(String, nullable=True)      # comma-separated release groups, ranked
     prefer_season_packs = Column(Boolean, default=False, server_default="0")
 
+    # Optional reusable quality profile; when set it overrides the per-item
+    # quality / codec / size / groups / season-pack fields above.
+    profile_id = Column(Integer, ForeignKey("quality_profiles.id"), nullable=True)
+
     episodes = relationship(
         "WatchlistEpisode",
         back_populates="watchlist_item",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+
+class QualityProfile(Base):
+    """Named, reusable download preferences assignable to watchlist items."""
+    __tablename__ = "quality_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    quality = Column(String, nullable=False, default="1080p", server_default="1080p")
+    codec = Column(String, nullable=False, default="x265", server_default="x265")
+    max_size_mb = Column(Integer, nullable=True)
+    preferred_groups = Column(String, nullable=True)
+    prefer_season_packs = Column(Boolean, default=False, server_default="0")
+    # If nothing is found at `quality` this long after an episode aired, try this.
+    fallback_quality = Column(String, nullable=True)
+    fallback_after_hours = Column(Integer, nullable=False, default=24, server_default="24")
 
 
 class WatchlistEpisode(Base):

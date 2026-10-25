@@ -198,10 +198,10 @@ class TestRetry:
         _setting(db, apprise_url="json://x")
         w = _watch(db)
         _dl(db, watchlist_id=w.id)
-        with patch("app.services.download_events.find_candidates",
+        with patch("app.services.download_events.find_with_fallback",
                    return_value=[_candidate()]) as fc:
             self._fail(db, sweep)
-        excluded = fc.call_args.args[4]
+        excluded = fc.call_args.args[4]  # (item, season, episode, min_seeds, hashes, titles)
         assert "aaa111" in excluded
         new = db.query(Download).filter(Download.status == "downloading").one()
         assert new.title == "Show S01E02 720p" and new.retry_count == 1
@@ -213,7 +213,7 @@ class TestRetry:
     def test_no_candidates_drops_episode_and_rolls_pointer_back(self, db, sweep):
         w = _watch(db, season=1, episode=3)
         _dl(db, watchlist_id=w.id)
-        with patch("app.services.download_events.find_candidates", return_value=[]):
+        with patch("app.services.download_events.find_with_fallback", return_value=[]):
             self._fail(db, sweep)
         db.refresh(w)
         assert w.episode == 2  # scanner will look again next cycle
@@ -225,7 +225,7 @@ class TestRetry:
         w = _watch(db)
         _dl(db, watchlist_id=w.id, torrent_hash="old000", status="failed")
         _dl(db, watchlist_id=w.id)
-        with patch("app.services.download_events.find_candidates") as fc:
+        with patch("app.services.download_events.find_with_fallback") as fc:
             self._fail(db, sweep)
         fc.assert_not_called()
         db.refresh(w)
@@ -237,28 +237,28 @@ class TestRetry:
         _setting(db, retry_enabled="false")
         w = _watch(db)
         _dl(db, watchlist_id=w.id)
-        with patch("app.services.download_events.find_candidates") as fc:
+        with patch("app.services.download_events.find_with_fallback") as fc:
             self._fail(db, sweep)
         fc.assert_not_called()
         assert db.query(Download).filter(Download.status == "downloading").count() == 0
 
     def test_manual_download_is_not_retried(self, db, sweep):
         _dl(db, watchlist_id=None)
-        with patch("app.services.download_events.find_candidates") as fc:
+        with patch("app.services.download_events.find_with_fallback") as fc:
             self._fail(db, sweep)
         fc.assert_not_called()
 
     def test_season_pack_is_not_retried(self, db, sweep):
         w = _watch(db)
         _dl(db, watchlist_id=w.id, title="Show S01 COMPLETE 1080p")
-        with patch("app.services.download_events.find_candidates") as fc:
+        with patch("app.services.download_events.find_with_fallback") as fc:
             self._fail(db, sweep)
         fc.assert_not_called()
 
     def test_add_failure_is_handled(self, db, sweep):
         w = _watch(db)
         _dl(db, watchlist_id=w.id)
-        with patch("app.services.download_events.find_candidates", return_value=[_candidate()]), \
+        with patch("app.services.download_events.find_with_fallback", return_value=[_candidate()]), \
              patch("app.services.qbittorrent.add_torrent", side_effect=RuntimeError("boom")):
             self._fail(db, sweep)
         assert db.query(Download).filter(Download.status == "downloading").count() == 0

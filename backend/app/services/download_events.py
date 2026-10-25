@@ -11,8 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 from .candidates import (
     WATCHLIST_LOCK,
+    effective_item,
     failed_hashes,
-    find_candidates,
+    failed_titles,
+    find_with_fallback,
     parse_episode_tag,
 )
 from .qbit_states import ERROR_STATES
@@ -87,6 +89,33 @@ def _remove_from_qbit(dl) -> None:
     dl.qbit_removed = True
 
 
+def _undo_season_pack(db, dl, item) -> str:
+    """Forget a failed season pack so the scanner can look again.
+
+    A pack records every aired episode against its info-hash and moves the
+    watchlist pointer to the next season.  Undo both; the next scan then looks
+    for another pack (never the failed one) or falls back to single episodes.
+    """
+    from ..models import WatchlistEpisode
+
+    if not dl.torrent_hash:
+        return ""
+    with WATCHLIST_LOCK:
+        rows = db.query(WatchlistEpisode).filter_by(
+            watchlist_id=item.id, torrent_hash=dl.torrent_hash
+        ).all()
+        if not rows:
+            return ""
+        season = rows[0].season
+        first = min(r.episode for r in rows)
+        for r in rows:
+            db.delete(r)
+        if item.season == season + 1 and item.episode == 1:
+            item.season, item.episode = season, first
+        db.commit()
+    return f"Season {season} pack failed — will look for another release next scan."
+
+
 def retry_download(db, dl, settings: dict, reason: str) -> str:
     """Re-search a failed/stalled watchlist episode and grab the next-best release.
 
@@ -101,14 +130,14 @@ def retry_download(db, dl, settings: dict, reason: str) -> str:
     if dl.watchlist_id is None:
         return ""
 
-    tag = parse_episode_tag(dl.title)
-    if tag is None:  # manual download or a season pack — nothing to re-search
-        return ""
-    season, episode = tag
-
     item = db.query(WatchlistItem).filter(WatchlistItem.id == dl.watchlist_id).first()
     if item is None:
         return ""
+
+    tag = parse_episode_tag(dl.title)
+    if tag is None:  # not a single episode: a failed season pack, if we recorded one
+        return _undo_season_pack(db, dl, item)
+    season, episode = tag
 
     ep_tag = f"S{season:02d}E{episode:02d}"
     max_attempts = _int(settings, "retry_max_attempts", 3)
@@ -117,6 +146,8 @@ def retry_download(db, dl, settings: dict, reason: str) -> str:
 
     with WATCHLIST_LOCK:
         excluded = failed_hashes(db, item.id, season, episode)
+        excluded_titles = failed_titles(db, item.id, season, episode)
+        excluded_titles.add(dl.title.lower())
         if dl.torrent_hash:
             excluded.add(dl.torrent_hash.lower())
 
@@ -128,12 +159,15 @@ def retry_download(db, dl, settings: dict, reason: str) -> str:
                 item.episode = episode  # let the scanner try again next cycle
             db.commit()
 
-        if len(excluded) >= max_attempts:
+        attempts = max(len(excluded), len(excluded_titles))
+        if attempts >= max_attempts:
             drop_episode_record(rollback_pointer=False)
-            return f"Gave up on {ep_tag} after {len(excluded)} attempts."
+            return f"Gave up on {ep_tag} after {attempts} attempts."
 
         try:
-            candidates = find_candidates(item, season, episode, min_seeds, excluded)
+            candidates = find_with_fallback(
+                effective_item(db, item), season, episode, min_seeds, excluded, excluded_titles
+            )
         except Exception as exc:
             logger.error("Retry search failed for %s %s: %s", item.title, ep_tag, exc)
             candidates = []

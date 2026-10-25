@@ -32,7 +32,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from ..database import DATABASE_URL, get_db
+from ..database import DATABASE_URL, engine, get_db
+from ..migrations import run_migrations
 from ..models import Setting
 from ..services.scheduler import get_scheduler
 
@@ -156,6 +157,14 @@ async def restore_backup(file: UploadFile = File(...)):
 
             # os.replace() is atomic on Linux/POSIX — safe inside Docker.
             os.replace(tmp_path, _DB_PATH)
+            # Drop pooled connections still pointing at the replaced file, then
+            # bring an older backup's schema up to date.
+            # Best-effort: the swap already succeeded, and startup migrates too.
+            try:
+                engine.dispose()
+                run_migrations()
+            except Exception as mig_exc:
+                logger.warning("Post-restore schema migration skipped: %s", mig_exc)
             logger.info(
                 "Database restored from backup (backup created: %s)",
                 meta.get("created_at", "unknown"),

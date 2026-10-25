@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import WatchlistEpisode, WatchlistItem
+from ..models import QualityProfile, WatchlistEpisode, WatchlistItem
 from ..schemas import (
     MarkEpisodeRequest,
     WatchlistCreate,
@@ -18,6 +18,11 @@ from ..schemas import (
 router = APIRouter()
 
 
+def _require_profile(db: Session, profile_id: int | None) -> None:
+    if profile_id is not None and not db.query(QualityProfile).filter(QualityProfile.id == profile_id).first():
+        raise HTTPException(status_code=422, detail="Quality profile not found")
+
+
 @router.get("/watchlist", response_model=list[WatchlistOut])
 def get_watchlist(db: Session = Depends(get_db)):
     return db.query(WatchlistItem).order_by(WatchlistItem.created_at.desc()).all()
@@ -25,6 +30,7 @@ def get_watchlist(db: Session = Depends(get_db)):
 
 @router.post("/watchlist", response_model=WatchlistOut, status_code=201)
 def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get_db)):
+    _require_profile(db, item.profile_id)
     db_item = WatchlistItem(**item.model_dump())
     db.add(db_item)
     db.commit()
@@ -39,6 +45,7 @@ def update_watchlist_item(
     db_item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
     if not db_item:
         raise HTTPException(status_code=404, detail="Item not found")
+    _require_profile(db, item.profile_id)
     for field, value in item.model_dump(exclude_unset=True).items():
         setattr(db_item, field, value)
     db.commit()

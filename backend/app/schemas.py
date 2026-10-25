@@ -1,5 +1,5 @@
-from pydantic import BaseModel, field_serializer
-from typing import Optional
+from pydantic import BaseModel, Field, field_serializer
+from typing import Literal, Optional
 from datetime import datetime
 
 
@@ -56,6 +56,7 @@ class WatchlistCreate(BaseModel):
     max_size_mb: Optional[int] = None
     preferred_groups: Optional[str] = None
     prefer_season_packs: bool = False
+    profile_id: Optional[int] = None
 
 
 class WatchlistUpdate(BaseModel):
@@ -70,6 +71,7 @@ class WatchlistUpdate(BaseModel):
     max_size_mb: Optional[int] = None
     preferred_groups: Optional[str] = None
     prefer_season_packs: Optional[bool] = None
+    profile_id: Optional[int] = None
 
 
 class WatchlistOut(BaseModel):
@@ -92,6 +94,7 @@ class WatchlistOut(BaseModel):
     max_size_mb: Optional[int] = None
     preferred_groups: Optional[str] = None
     prefer_season_packs: bool = False
+    profile_id: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -112,6 +115,54 @@ class WatchlistEpisodeOut(BaseModel):
         return v.isoformat() + "Z"
 
     model_config = {"from_attributes": True}
+
+
+# ── Quality profiles ──────────────────────────────────────────────────────────
+
+QualityName = Literal["4K", "1080p", "720p", "480p", "Any"]
+CodecName = Literal["x265", "x264", "AV1", "Any"]
+
+
+class ProfileCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    quality: QualityName = "1080p"
+    codec: CodecName = "x265"
+    max_size_mb: Optional[int] = Field(default=None, ge=1)
+    preferred_groups: Optional[str] = None
+    prefer_season_packs: bool = False
+    fallback_quality: Optional[QualityName] = None
+    fallback_after_hours: int = Field(default=24, ge=1, le=24 * 30)
+
+
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    quality: Optional[QualityName] = None
+    codec: Optional[CodecName] = None
+    max_size_mb: Optional[int] = Field(default=None, ge=1)
+    preferred_groups: Optional[str] = None
+    prefer_season_packs: Optional[bool] = None
+    fallback_quality: Optional[QualityName] = None
+    fallback_after_hours: Optional[int] = Field(default=None, ge=1, le=24 * 30)
+
+
+class ProfileOut(BaseModel):
+    id: int
+    name: str
+    quality: str
+    codec: str
+    max_size_mb: Optional[int] = None
+    preferred_groups: Optional[str] = None
+    prefer_season_packs: bool = False
+    fallback_quality: Optional[str] = None
+    fallback_after_hours: int = 24
+    watchlist_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class JackettTestRequest(BaseModel):
+    url: str
+    api_key: str
 
 
 class MarkEpisodeRequest(BaseModel):

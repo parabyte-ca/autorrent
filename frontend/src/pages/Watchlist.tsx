@@ -18,6 +18,7 @@ import {
   api,
   type DownloadPath,
   type MarkEpisodeRequest,
+  type QualityProfile,
   type WatchlistCreate,
   type WatchlistEpisode,
   type WatchlistItem,
@@ -63,18 +64,30 @@ function ShowStatusBadge({ status }: { status: WatchlistItem["show_status"] }) {
 
 // ── Form modal ────────────────────────────────────────────────────────────────
 
-function FormModal({ initial, paths, onClose, onSave }: {
+function profileSummary(p: QualityProfile): string {
+  const parts = [p.quality, p.codec];
+  if (p.max_size_mb) parts.push(`max ${p.max_size_mb >= 1024 ? `${(p.max_size_mb / 1024).toFixed(1)} GB` : `${p.max_size_mb} MB`}`);
+  if (p.preferred_groups) parts.push(`groups: ${p.preferred_groups}`);
+  if (p.prefer_season_packs) parts.push("season packs");
+  if (p.fallback_quality) parts.push(`falls back to ${p.fallback_quality} after ${p.fallback_after_hours}h`);
+  return parts.join(" · ");
+}
+
+function FormModal({ initial, paths, profiles, defaultProfileId, onClose, onSave }: {
   initial?: WatchlistItem;
   paths: DownloadPath[];
+  profiles: QualityProfile[];
+  defaultProfileId: number | null;
   onClose: () => void;
   onSave: (data: WatchlistCreate) => void;
 }) {
   const defaultPath = paths.find((p) => p.is_default);
   const [form, setForm] = useState<WatchlistCreate>(
     initial
-      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false }
-      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false }
+      ? { title: initial.title, search_query: initial.search_query, quality: initial.quality, codec: initial.codec ?? "x265", season: initial.season, episode: initial.episode, download_path_id: initial.download_path_id, enabled: initial.enabled, max_size_mb: initial.max_size_mb ?? null, preferred_groups: initial.preferred_groups ?? null, prefer_season_packs: initial.prefer_season_packs ?? false, profile_id: initial.profile_id ?? null }
+      : { title: "", search_query: "", quality: "1080p", codec: "x265", season: 1, episode: 1, download_path_id: defaultPath?.id, enabled: true, max_size_mb: null, preferred_groups: null, prefer_season_packs: false, profile_id: profiles.some((p) => p.id === defaultProfileId) ? defaultProfileId : null }
   );
+  const profile = profiles.find((p) => p.id === form.profile_id);
   const set = (k: keyof WatchlistCreate, v: unknown) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.title.trim() && form.search_query.trim();
 
@@ -105,6 +118,25 @@ function FormModal({ initial, paths, onClose, onSave }: {
               <input type="number" min={1} value={form.episode} onChange={(e) => set("episode", Number(e.target.value))} className={FIELD} />
             </div>
           </div>
+          {profiles.length > 0 && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Quality profile</label>
+              <select
+                value={form.profile_id ?? ""}
+                onChange={(e) => set("profile_id", e.target.value ? Number(e.target.value) : null)}
+                className={FIELD}
+              >
+                <option value="">Custom (set below)</option>
+                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              {profile && (
+                <p className="mt-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
+                  {profileSummary(profile)}
+                </p>
+              )}
+            </div>
+          )}
+          {!profile && (
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Quality</label>
@@ -119,6 +151,7 @@ function FormModal({ initial, paths, onClose, onSave }: {
               </select>
             </div>
           </div>
+          )}
           {paths.length > 0 && (
             <div>
               <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Save to</label>
@@ -132,7 +165,8 @@ function FormModal({ initial, paths, onClose, onSave }: {
             </div>
           )}
 
-          {/* Advanced options */}
+          {/* Advanced options (a profile supplies these instead) */}
+          {!profile && (
           <details className="group">
             <summary className="cursor-pointer select-none text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 list-none flex items-center gap-1">
               <span className="group-open:rotate-90 transition-transform inline-block">›</span>
@@ -178,6 +212,7 @@ function FormModal({ initial, paths, onClose, onSave }: {
               </label>
             </div>
           </details>
+          )}
         </div>
         <div className="mt-5 flex gap-3">
           <button onClick={onClose} className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800">
@@ -194,9 +229,10 @@ function FormModal({ initial, paths, onClose, onSave }: {
 
 // ── Watchlist card with episode tracking ──────────────────────────────────────
 
-function WatchlistCard({ item, paths, scanning, selected, onToggleSelect, onToggle, onScan, onEdit, onDelete, onRefresh }: {
+function WatchlistCard({ item, paths, profiles, scanning, selected, onToggleSelect, onToggle, onScan, onEdit, onDelete, onRefresh }: {
   item: WatchlistItem;
   paths: DownloadPath[];
+  profiles: QualityProfile[];
   scanning: number | "all" | null;
   selected: boolean;
   onToggleSelect: () => void;
@@ -217,6 +253,9 @@ function WatchlistCard({ item, paths, scanning, selected, onToggleSelect, onTogg
   const [checkingStatus, setCheckingStatus] = useState(false);
 
   const pathName = (id?: number) => paths.find((p) => p.id === id)?.name ?? "Default";
+  // When a profile is assigned it overrides the item's own preference fields.
+  const profile = profiles.find((p) => p.id === item.profile_id);
+  const shown = profile ?? item;
 
   const fetchEpisodes = async () => {
     setLoadingEps(true);
@@ -360,14 +399,18 @@ function WatchlistCard({ item, paths, scanning, selected, onToggleSelect, onTogg
       {/* Details */}
       <div className="mb-3 space-y-1 text-xs text-gray-500 dark:text-gray-400">
         <div className="flex flex-wrap gap-3">
-          <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{item.quality}</strong></span>
-          <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{item.codec ?? "x265"}</strong></span>
+          {profile && <span>Profile: <strong className="text-gray-700 dark:text-gray-300">{profile.name}</strong></span>}
+          <span>Quality: <strong className="text-gray-700 dark:text-gray-300">{shown.quality}</strong></span>
+          <span>Codec: <strong className="text-gray-700 dark:text-gray-300">{shown.codec ?? "x265"}</strong></span>
           <span>Save to: <strong className="text-gray-700 dark:text-gray-300">{pathName(item.download_path_id)}</strong></span>
-          {item.max_size_mb && <span>Max: <strong className="text-gray-700 dark:text-gray-300">{item.max_size_mb >= 1024 ? `${(item.max_size_mb / 1024).toFixed(1)} GB` : `${item.max_size_mb} MB`}</strong></span>}
-          {item.prefer_season_packs && <span className="text-blue-600 dark:text-blue-400 font-medium">Season packs</span>}
+          {shown.max_size_mb && <span>Max: <strong className="text-gray-700 dark:text-gray-300">{shown.max_size_mb >= 1024 ? `${(shown.max_size_mb / 1024).toFixed(1)} GB` : `${shown.max_size_mb} MB`}</strong></span>}
+          {shown.prefer_season_packs && <span className="text-blue-600 dark:text-blue-400 font-medium">Season packs</span>}
         </div>
-        {item.preferred_groups && (
-          <div>Groups: <strong className="text-gray-700 dark:text-gray-300">{item.preferred_groups}</strong></div>
+        {shown.preferred_groups && (
+          <div>Groups: <strong className="text-gray-700 dark:text-gray-300">{shown.preferred_groups}</strong></div>
+        )}
+        {profile?.fallback_quality && (
+          <div>Falls back to <strong className="text-gray-700 dark:text-gray-300">{profile.fallback_quality}</strong> after {profile.fallback_after_hours}h</div>
         )}
         <div className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
@@ -578,14 +621,19 @@ export default function Watchlist() {
   const [selected,   setSelected]  = useState<Set<number>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
   const [search,     setSearch]    = useState("");
+  const [profiles,   setProfiles]  = useState<QualityProfile[]>([]);
+  const [defaultProfileId, setDefaultProfileId] = useState<number | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const load = async () => {
     setLoading(true);
     try {
-      const [w, p] = await Promise.all([api.watchlist.list(), api.paths.list()]);
-      setItems(w); setPaths(p);
+      const [w, p, pr, st] = await Promise.all([
+        api.watchlist.list(), api.paths.list(), api.profiles.list(), api.settings.get(),
+      ]);
+      setItems(w); setPaths(p); setProfiles(pr);
+      setDefaultProfileId(st.default_profile_id ? Number(st.default_profile_id) : null);
     } finally { setLoading(false); }
   };
 
@@ -795,6 +843,7 @@ export default function Watchlist() {
                 key={item.id}
                 item={item}
                 paths={paths}
+                profiles={profiles}
                 scanning={scanning}
                 selected={selected.has(item.id)}
                 onToggleSelect={() => toggleSelect(item.id)}
@@ -810,7 +859,7 @@ export default function Watchlist() {
       )}
 
       {modal !== null && (
-        <FormModal initial={modal === true ? undefined : modal} paths={paths} onClose={() => setModal(null)} onSave={handleSave} />
+        <FormModal initial={modal === true ? undefined : modal} paths={paths} profiles={profiles} defaultProfileId={defaultProfileId} onClose={() => setModal(null)} onSave={handleSave} />
       )}
 
       {toast && (

@@ -6,6 +6,7 @@ import qbittorrentapi
 
 from ..database import SessionLocal
 from ..models import Setting
+from .torrent_meta import url_to_magnet
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,10 @@ def _hash_from_magnet(magnet: str) -> str | None:
 
 
 def add_torrent(magnet: str, save_path: str, category: str | None = None) -> str | None:
+    # Indexer proxies may hand us a .torrent URL; resolve it to a magnet first so
+    # the info-hash is known for duplicate detection and status tracking.
+    if magnet.lower().startswith(("http://", "https://")):
+        magnet, _ = url_to_magnet(magnet)
     client = _get_client()
     kwargs: dict = {"urls": magnet, "save_path": save_path}
     if category:
