@@ -175,3 +175,19 @@ class DownloadHistory(Base):
     watchlist_id = Column(Integer, ForeignKey("watchlist.id"), nullable=True)
     # Populated when status == "failed"
     error_msg = Column(String, nullable=True)
+
+
+class TraktSeen(Base):
+    """Trakt watchlist entries the sync has already dealt with.
+
+    Remembering them stops a show you deliberately removed from AutoRrent being
+    re-added on the next sync.  Unmatched shows are retried after a week.
+    """
+    __tablename__ = "trakt_seen"
+
+    trakt_id = Column(Integer, primary_key=True, autoincrement=False)
+    title = Column(String, nullable=False)
+    # "added" | "existing" | "unmatched"
+    status = Column(String, nullable=False)
+    tvmaze_id = Column(Integer, nullable=True)
+    checked_at = Column(DateTime, nullable=False, server_default=func.now())

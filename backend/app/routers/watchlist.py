@@ -18,8 +18,7 @@ from ..schemas import (
     WatchlistUpdate,
 )
 
-from ..models import Setting
-from ..services import episode_guide, show_metadata, tvmaze
+from ..services import show_metadata, watchlist_add
 from ..services.calendar_view import build_guide
 from ..services.grab import grab_episode
 
@@ -60,41 +59,16 @@ async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get
 @router.post("/watchlist/from-tvmaze", response_model=WatchlistOut, status_code=201)
 async def add_from_tvmaze(body: AddFromTvmazeRequest, db: Session = Depends(get_db)):
     """Add a show picked from Browse, starting at its next new episode or the beginning."""
-    if db.query(WatchlistItem).filter(WatchlistItem.tvmaze_id == body.tvmaze_id).first():
-        raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
-    show = await tvmaze.get_show(body.tvmaze_id)
-    if show is None:
-        raise HTTPException(status_code=404, detail="TVMaze could not find that show.")
-
     if body.profile_id is not None:
         _require_profile(db, body.profile_id)  # an explicit choice must exist
-        profile_id = body.profile_id
-    else:
-        # Fall back to the default profile, quietly ignoring one that was deleted.
-        profile_id = None
-        row = db.query(Setting).filter(Setting.key == "default_profile_id").first()
-        if row and row.value and row.value.isdigit():
-            if db.query(QualityProfile).filter(QualityProfile.id == int(row.value)).first():
-                profile_id = int(row.value)
-
-    episodes = await episode_guide.aget_episodes(body.tvmaze_id)
-    season, episode = show_metadata.starting_point(
-        episodes, show.get("status"), body.start,
-    )
-    name = show.get("name") or "Unknown show"
-    db_item = WatchlistItem(
-        title=name,
-        search_query=show_metadata.search_query_from_name(name),
-        season=season,
-        episode=episode,
-        profile_id=profile_id,
-    )
-    show_metadata.apply_show(db_item, show)
-    db_item.metadata_checked_at = datetime.now(timezone.utc)
-    db.add(db_item)
-    db.commit()
-    db.refresh(db_item)
-    return db_item
+    try:
+        return await watchlist_add.create_from_tvmaze(
+            db, body.tvmaze_id, start=body.start, profile_id=body.profile_id,
+        )
+    except watchlist_add.AlreadyOnWatchlist:
+        raise HTTPException(status_code=409, detail="That show is already on your watchlist.")
+    except watchlist_add.ShowNotFound:
+        raise HTTPException(status_code=404, detail="TVMaze could not find that show.")
 
 
 @router.post("/watchlist/refresh-metadata")

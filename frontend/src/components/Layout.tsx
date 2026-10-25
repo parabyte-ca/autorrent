@@ -19,6 +19,7 @@ import {
 import { useTheme, type Theme } from "../ThemeContext";
 import { authStore } from "../auth";
 import { api } from "../api/client";
+import OnboardingWizard from "./OnboardingWizard";
 
 const nav = [
   { to: "/search",    label: "Search",    icon: Search        },
@@ -53,6 +54,12 @@ export default function Layout() {
     api.updates.status()
       .then((s) => setUpdateAvailable(s.update_available))
       .catch(() => {});
+  }, []);
+
+  const [onboarding, setOnboarding] = useState(false);
+
+  useEffect(() => {
+    api.onboarding.status().then((s) => setOnboarding(s.needed)).catch(() => {});
   }, []);
 
   const [lowSpace, setLowSpace] = useState<{ name: string; free: number }[]>([]);
@@ -91,6 +98,8 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-50 dark:bg-gray-950">
+      {onboarding && <OnboardingWizard onClose={() => setOnboarding(false)} />}
+
       {/* ── Sidebar (md and above) ──────────────────────────────────────────── */}
       <aside
         className={`hidden md:flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm transition-all duration-200 shrink-0 ${

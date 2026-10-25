@@ -598,6 +598,26 @@ def _record_digest_sent() -> None:
         db.close()
 
 
+def run_trakt_sync() -> None:
+    """APScheduler-safe wrapper: sync the Trakt watchlist if the user has enabled it."""
+    from ..database import SessionLocal
+    from ..models import Setting
+    from . import trakt_sync
+
+    db = SessionLocal()
+    try:
+        s = {row.key: row.value for row in db.query(Setting).all()}
+        if (s.get("trakt_enabled") or "").lower() != "true":
+            return
+        if not (s.get("trakt_client_id") or "").strip() or not (s.get("trakt_username") or "").strip():
+            return
+        asyncio.run(trakt_sync.sync(db))
+    except Exception as exc:
+        logger.error("Trakt sync failed: %s", exc)
+    finally:
+        db.close()
+
+
 def _get_interval() -> int:
     from ..database import SessionLocal
     from ..models import Setting
@@ -644,6 +664,12 @@ def start_scheduler() -> None:
         process_download_events,
         trigger=IntervalTrigger(minutes=10),
         id="download_events",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        run_trakt_sync,
+        trigger=IntervalTrigger(hours=6),
+        id="trakt_sync",
         replace_existing=True,
     )
     _scheduler.add_job(

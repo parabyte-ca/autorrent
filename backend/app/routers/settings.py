@@ -40,6 +40,13 @@ DEFAULTS: dict[str, str] = {
     "default_indexer": "all",
     "default_profile_id": "",
     "browse_country": "US",
+    # Trakt watchlist sync
+    "trakt_enabled": "false",
+    "trakt_client_id": "",
+    "trakt_username": "",
+    "trakt_start": "auto",
+    # First-run wizard
+    "onboarding_done": "false",
     # Plex
     "plex_enabled": "false",
     "plex_url": "",
@@ -74,6 +81,7 @@ _PRIVATE_KEYS = {
     "update_release_cache",
     "update_notified_version",
     "disk_warned",
+    "trakt_last_result",
 }
 
 
