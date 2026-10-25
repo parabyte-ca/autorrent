@@ -1,5 +1,12 @@
 name: Build and push Docker image
 
+# Releases are automatic. Every merge to main is looked at by
+# scripts/next_version.py: a "feat:" PR bumps the minor version, "fix:"/"perf:"
+# the patch version, a breaking change the major version; docs/ci/test/chore
+# merges build an image but do not release. A release builds the image, pushes
+# it as vX.Y.Z / X.Y / latest, then creates the git tag and the GitHub release
+# (the in-app updater offers that release). Pushing a vX.Y.Z tag by hand still
+# works and builds exactly that version.
 on:
   push:
     branches:
@@ -7,6 +14,13 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+
+# One build per tag, and one at a time for main: merges queue behind each other,
+# so two merges can never both compute the same next version. (A run still waiting
+# when a newer merge arrives is superseded; the newer run covers its commits.)
+concurrency:
+  group: build-${{ github.ref_type == 'tag' && github.ref_name || 'main' }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -19,7 +33,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history and tags, so branch builds can find the latest release
+          fetch-depth: 0   # full history and tags, to find the last release and what changed since
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -31,9 +45,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve app version
-        id: appver
-        run: echo "value=$(bash scripts/resolve-version.sh)" >> "$GITHUB_OUTPUT"
+      - name: Decide version and whether to release
+        id: ver
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 scripts/next_version.py >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata for Docker
         id: meta
@@ -44,7 +60,9 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+            type=raw,value=${{ steps.ver.outputs.version }},enable=${{ steps.ver.outputs.release == 'true' }}
+            type=raw,value=${{ steps.ver.outputs.minor }},enable=${{ steps.ver.outputs.release == 'true' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -56,10 +74,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            APP_VERSION=${{ steps.appver.outputs.value }}
+            APP_VERSION=${{ steps.ver.outputs.version }}
 
-      - name: Create GitHub Release
-        if: github.ref_type == 'tag'
+      # Last on purpose: a release only exists once its image can be pulled.
+      # Creating the release creates the tag too (at this commit); tags made with
+      # the workflow token do not start another run, so nothing builds twice.
+      - name: Create tag and GitHub release
+        if: github.ref_type == 'tag' || steps.ver.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true

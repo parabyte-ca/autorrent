@@ -110,6 +110,8 @@ docker pull ghcr.io/parabyte-ca/autorrent:latest
 docker compose up -d
 ```
 
+You can also update from inside the app: the **Updates** page shows when a new release is available and can install it for you (see `scripts/upgrade-agent.sh`).
+
 Your data is stored in `./data/` and is not affected by updates.
 
 > **First-time setup:** After the first successful GitHub Actions build, the package visibility must be set to **Public** so the image can be pulled without authentication. Go to `https://github.com/parabyte-ca?tab=packages`, find the `autorrent` package, and set its visibility to Public.
@@ -339,6 +341,19 @@ AuTorrent/
 ## Contributing
 
 Bug reports and pull requests are welcome. Please open an issue first for any significant changes so we can discuss the approach before you invest time in it.
+
+### Releases are automatic
+
+Merging to `main` publishes a release when the merged change warrants one — you don't create tags by hand. The pull request **title** decides (use the [conventional commit](https://www.conventionalcommits.org) style):
+
+| PR title | Release |
+|---|---|
+| `feat: …` | minor — `2.6.1` → `2.7.0` |
+| `fix: …`, `perf: …` | patch — `2.6.0` → `2.6.1` |
+| `feat!: …`, `fix!: …`, or a `BREAKING CHANGE:` line in the body | major — `2.7.0` → `3.0.0` |
+| `docs:`, `ci:`, `test:`, `chore:`, `refactor:`, `style:`, `build:` | none (an image is still built) |
+
+Add `[skip release]` to a PR title to merge without releasing. When several PRs merge before a build runs, the biggest change wins. A release builds the image (`vX.Y.Z`, `X.Y` and `latest`), then creates the git tag and GitHub release; the in-app **Updates** page offers it. To release whatever is pending right now, run the *Build and push Docker image* workflow manually on `main`. Pushing a `vX.Y.Z` tag yourself still works and builds exactly that version. The logic lives in `scripts/next_version.py`.
 
 ---
 
