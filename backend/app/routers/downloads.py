@@ -3,8 +3,6 @@ import logging
 import threading
 from datetime import datetime, timedelta, timezone
 
-_STALE_THRESHOLD = timedelta(hours=2)
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -13,38 +11,11 @@ from ..models import Download, DownloadHistory, DownloadPath, Setting
 from ..schemas import DownloadCreate, DuplicateCheckRequest
 from ..services.duplicate import check_duplicate
 from ..services.media_servers import trigger_media_refresh
+from ..services.qbit_states import DOWNLOADING_STATES, ERROR_STATES, QBITTORRENT_COMPLETE_STATES
 from ..services.qbittorrent import _hash_from_magnet, add_torrent, get_all_torrent_statuses, remove_torrent
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# All qBittorrent state strings that mean the torrent has finished downloading.
-# Previously the code only checked a subset ("uploading", "stalledUP", "forcedUP"),
-# which caused torrents in pausedUP / checkingUP / completed / moving to remain
-# stuck at "downloading" in AutoRrent's UI.
-QBITTORRENT_COMPLETE_STATES = {
-    "uploading",    # seeding normally
-    "stalledUP",    # seeding, no peers
-    "checkingUP",   # integrity check after completion
-    "forcedUP",     # force-started seeding
-    "pausedUP",     # paused after completion
-    "queuedUP",     # queued to seed (upload queue full) — download IS complete
-    "completed",    # explicitly marked complete by qBittorrent
-    "moving",       # being moved to final location — grace-period clock starts once done
-}
-
-DOWNLOADING_STATES = {
-    "downloading",
-    "stalledDL",         # stalled, no peers
-    "forcedDL",          # force-started download
-    "checkingDL",        # integrity check mid-download
-    "metaDL",            # fetching torrent metadata
-    "queuedDL",          # waiting in download queue (0% but not stuck in AutoRrent)
-    "pausedDL",          # paused by user in qBittorrent
-    "allocating",        # allocating disk space before downloading
-    "checkingResumeData", # rechecking on qBittorrent restart
-}
-ERROR_STATES = {"error", "missingFiles"}
 
 # Seconds to wait after first seeing a complete state before removing the
 # torrent from qBittorrent.  Hardcoded — not user-configurable.
@@ -107,6 +78,12 @@ def get_downloads(db: Session = Depends(get_db)):
     downloads = db.query(Download).order_by(Download.created_at.desc()).all()
     result = []
 
+    stall_row = db.query(Setting).filter(Setting.key == "stall_hours").first()
+    try:
+        stale_threshold = timedelta(hours=max(int(stall_row.value), 1)) if stall_row and stall_row.value else timedelta(hours=2)
+    except ValueError:
+        stale_threshold = timedelta(hours=2)
+
     # Fetch ALL torrent statuses in a single qBittorrent API call.
     # Returns None if qBittorrent is unreachable (we skip status updates in that case).
     # Returns {} if qBittorrent is reachable but has no torrents.
@@ -123,15 +100,13 @@ def get_downloads(db: Session = Depends(get_db)):
     for d in downloads:
         now = datetime.now(timezone.utc)
 
-        # A torrent is stale if it has been in "downloading" state for more than
-        # _STALE_THRESHOLD with no sign of completion.  We compute this here
-        # (before the qBittorrent status update) so the flag survives even when
-        # qBittorrent is unreachable.
-        is_stale = (
-            d.status == "downloading"
-            and d.created_at is not None
-            and (now - d.created_at.replace(tzinfo=timezone.utc if d.created_at.tzinfo is None else d.created_at.tzinfo)) >= _STALE_THRESHOLD
-        )
+        # Stale = no download progress for the configured stall window.  The event
+        # sweep records last_progress_at; before it has seen a torrent we fall
+        # back to the age of the download.
+        ref = d.last_progress_at or d.created_at
+        if ref is not None and ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+        is_stale = d.status == "downloading" and ref is not None and (now - ref) >= stale_threshold
 
         item = {
             "id": d.id,

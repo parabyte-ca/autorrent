@@ -26,6 +26,16 @@ DEFAULTS: dict[str, str] = {
     "jackett_url": "",
     "jackett_api_key": "",
     "apprise_url": "",
+    # Alerts (each is "true"/"false")
+    "notify_on_grab": "true",
+    "notify_on_complete": "true",
+    "notify_on_failed": "true",
+    "notify_on_stalled": "true",
+    # Stall detection, retry queue and disk space
+    "stall_hours": "2",
+    "retry_enabled": "true",
+    "retry_max_attempts": "3",
+    "low_disk_warn_gb": "10",
     "default_indexer": "all",
     # Plex
     "plex_enabled": "false",
@@ -60,6 +70,7 @@ _PRIVATE_KEYS = {
     "last_digest_sent_at",
     "update_release_cache",
     "update_notified_version",
+    "disk_warned",
 }
 
 

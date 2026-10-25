@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, BigInteger, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, BigInteger, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -87,6 +87,15 @@ class Download(Base):
     completion_first_seen_at = Column(DateTime, nullable=True)
     # True once the torrent has been successfully deleted from qBittorrent.
     qbit_removed = Column(Boolean, default=False, server_default="0")
+    # Alert de-duplication: each event notifies at most once per download.
+    notified_complete = Column(Boolean, default=False, server_default="0")
+    notified_failed = Column(Boolean, default=False, server_default="0")
+    notified_stalled = Column(Boolean, default=False, server_default="0")
+    # Progress tracking used for real stall detection (no progress for N hours).
+    last_progress = Column(Float, nullable=True)
+    last_progress_at = Column(DateTime, nullable=True)
+    # How many automatic re-searches led to this download (0 = original grab).
+    retry_count = Column(Integer, default=0, server_default="0")
 
 
 class DownloadPath(Base):

@@ -37,6 +37,7 @@ class DownloadPathOut(BaseModel):
     is_default: bool
     free_bytes: Optional[int] = None
     total_bytes: Optional[int] = None
+    low_space: bool = False
 
     model_config = {"from_attributes": True}
 

@@ -521,10 +521,10 @@ class TestRequestUpgrade:
 class TestUpdateEndpoints:
     _AUTH = {"Authorization": "Bearer test-token"}
 
-    def test_get_status_401_without_auth(self, client, upgrade_dir):
+    def test_get_status_without_header_works_for_local_requests(self, client, upgrade_dir):
         with patch("app.services.updater._get_folder", return_value=upgrade_dir):
             r = client.get("/admin/updates")
-        assert r.status_code == 401
+        assert r.status_code == 200
 
     def test_get_status_200(self, client, upgrade_dir):
         with patch("app.services.updater._get_folder", return_value=upgrade_dir):
@@ -542,10 +542,11 @@ class TestUpdateEndpoints:
             r = client.post("/admin/updates/check", headers=self._AUTH)
         assert r.status_code == 200
 
-    def test_upgrade_401_without_auth(self, client, upgrade_dir):
-        with patch("app.services.updater._get_folder", return_value=upgrade_dir):
+    def test_upgrade_without_header_reaches_handler_for_local_requests(self, client, upgrade_dir):
+        with patch("app.services.updater._get_folder", return_value=upgrade_dir), \
+             patch("app.services.updater.request_upgrade", side_effect=ValueError("nope")):
             r = client.post("/admin/updates/upgrade", json={"version": "2.5.0"})
-        assert r.status_code == 401
+        assert r.status_code == 400  # handler ran; not blocked as 401
 
     def test_upgrade_400_on_bad_version(self, client, upgrade_dir):
         with patch("app.services.updater._get_folder", return_value=upgrade_dir), \
@@ -558,6 +559,53 @@ class TestUpdateEndpoints:
         with patch("app.services.updater._get_folder", return_value=upgrade_dir):
             r = client.post("/admin/updates/upgrade", json={}, headers=self._AUTH)
         assert r.status_code == 422
+
+
+class TestUpdateEndpointsBehindAuthMiddleware:
+    """The real auth boundary: AuthMiddleware protects /api/admin/updates."""
+
+    @pytest.fixture()
+    def secured(self, db_session, upgrade_dir):
+        from app.middleware.auth import AuthMiddleware
+        from app.services.token import make_token
+
+        db_session.add(Setting(key="ui_password", value="hunter2"))
+        db_session.add(Setting(key="session_secret", value="s3cret"))
+        db_session.commit()
+
+        app = FastAPI()
+        app.add_middleware(AuthMiddleware)
+        app.include_router(router, prefix="/api")
+
+        def _override():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override
+        with patch("app.middleware.auth.SessionLocal", return_value=db_session), \
+             patch.object(db_session, "close"), \
+             patch("app.services.updater._get_folder", return_value=upgrade_dir):
+            yield TestClient(app), make_token("s3cret", "hunter2")
+
+    def test_cloudflare_request_without_token_is_rejected(self, secured):
+        client, _ = secured
+        r = client.get("/api/admin/updates", headers={"cf-connecting-ip": "1.2.3.4"})
+        assert r.status_code == 401
+
+    def test_cloudflare_request_with_garbage_token_is_rejected(self, secured):
+        client, _ = secured
+        r = client.get("/api/admin/updates", headers={
+            "cf-connecting-ip": "1.2.3.4", "Authorization": "Bearer garbage"})
+        assert r.status_code == 401
+
+    def test_cloudflare_request_with_valid_token_is_allowed(self, secured):
+        client, token = secured
+        r = client.get("/api/admin/updates", headers={
+            "cf-connecting-ip": "1.2.3.4", "Authorization": f"Bearer {token}"})
+        assert r.status_code == 200
+
+    def test_local_request_is_allowed(self, secured):
+        client, _ = secured
+        assert client.get("/api/admin/updates").status_code == 200
 
 
 # ── parse_gh_repo ─────────────────────────────────────────────────────────────
