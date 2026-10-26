@@ -39,6 +39,7 @@ echo "git $*" >> "$FAKE_LOG"
 args=" $* "
 if [[ "$args" == *" config --get remote.origin.url "* ]]; then echo "$FAKE_ORIGIN_URL"; exit 0; fi
 if [[ "$args" == *" rev-parse "* ]]; then echo "abc1234"; exit 0; fi
+if [[ "$args" == *" symbolic-ref "* && -n "${FAKE_DETACHED:-}" ]]; then exit 1; fi
 if [[ "$args" == *" https://"* && -n "${FAKE_HTTPS_FAIL:-}" ]]; then echo "fatal: unable to access" >&2; exit 128; fi
 if [[ "$args" == *" origin"* && -n "${FAKE_ORIGIN_FAIL:-}" ]]; then echo "fatal: Could not read from remote repository." >&2; exit 128; fi
 exit 0
@@ -64,13 +65,26 @@ echo "${FAKE_UID:-0}"
     "stat": r'''#!/usr/bin/env bash
 echo "${FAKE_OWNER:-root}"
 ''',
+    # Reports a stray (wrongly owned) file inside .git when FAKE_STRAY is set.
+    "find": r'''#!/usr/bin/env bash
+echo "find $*" >> "$FAKE_LOG"
+[[ -n "${FAKE_STRAY:-}" ]] && echo "$1/FETCH_HEAD"
+exit 0
+''',
+    "chown": r'''#!/usr/bin/env bash
+echo "chown $*" >> "$FAKE_LOG"
+[[ -n "${FAKE_CHOWN_FAIL:-}" ]] && exit 1
+exit 0
+''',
 }
 
 
 def run_update(tmp_path, *args, compose=REGISTRY_COMPOSE, uid="0", owner="amoote",
-               origin=SSH_REMOTE, sudo_user=None, **fake):
+               origin=SSH_REMOTE, sudo_user=None, git_dir=False, **fake):
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
+    if git_dir:
+        (repo / ".git").mkdir(exist_ok=True)
     (repo / "update.sh").write_text(SCRIPT.read_text())
     compose_file = repo / "docker-compose.yml"
     compose_file.write_text(compose)
@@ -185,7 +199,7 @@ class TestGitUser:
         assert any(c.startswith("sudo ") and "rev-parse" in c for c in calls)
 
     def test_checkout_of_a_version_runs_as_the_git_user(self, tmp_path):
-        _, calls = run_update(tmp_path, "--version", "2.6.0", uid="0", owner="amoote")
+        _, calls = run_update(tmp_path, "--version", "2.6.0", uid="0", owner="amoote", compose=BUILD_COMPOSE)
         checkout = [c for c in calls if " checkout " in c]
         assert checkout and checkout[0].startswith("sudo -H -u amoote ") and "v2.6.0" in checkout[0]
 
@@ -230,14 +244,14 @@ class TestGitFetch:
         assert not any("github.com/" in c for c in calls)
 
     def test_tags_are_fetched_over_https_for_a_version_upgrade(self, tmp_path):
-        proc, calls = run_update(tmp_path, "--version", "2.6.0", uid="1000")
+        proc, calls = run_update(tmp_path, "--version", "2.6.0", uid="1000", compose=BUILD_COMPOSE)
         assert proc.returncode == 0, proc.stderr
         fetch = [c for c in calls if " fetch " in c]
         assert fetch and fetch[0].endswith(f"fetch --tags {HTTPS}")
         assert any(c.endswith("checkout v2.6.0") for c in calls)
 
     def test_tag_fetch_falls_back_to_origin(self, tmp_path):
-        _, calls = run_update(tmp_path, "--version", "2.6.0", uid="1000", fake_https_fail="1")
+        _, calls = run_update(tmp_path, "--version", "2.6.0", uid="1000", fake_https_fail="1", compose=BUILD_COMPOSE)
         fetch = [c for c in calls if " fetch " in c]
         assert fetch[-1].endswith("fetch --tags origin")
 
@@ -254,7 +268,7 @@ class TestGitFetch:
 
 
 def test_cron_upgrade_to_a_release_end_to_end(tmp_path):
-    """Root, from cron, registry compose, SSH remote: fetch via HTTPS as the owner, then pull the image."""
+    """Root, from cron, registry compose, SSH remote: update the branch over HTTPS as the owner, pull the image."""
     proc, calls = run_update(
         tmp_path, "--version", "2.6.0", uid="0", owner="truenas_admin", origin=SSH_REMOTE,
     )
@@ -262,10 +276,100 @@ def test_cron_upgrade_to_a_release_end_to_end(tmp_path):
     assert "Deployment complete" in proc.stdout
     ops = (" pull ", " fetch ", " checkout ")
     via_sudo = [c for c in calls if c.startswith("sudo ") and any(o in c for o in ops)]
-    assert via_sudo, "git network/checkout work must go through sudo as the owner"
+    assert via_sudo, "git network work must go through sudo as the owner"
     assert all(c.startswith("sudo -H -u truenas_admin env GIT_TERMINAL_PROMPT=0 git -C ") for c in via_sudo)
     assert any(HTTPS in c for c in via_sudo) and not any("git@github.com" in c for c in via_sudo)
     # no git operation ran as root outside sudo: every git call has a matching sudo call
     assert len([c for c in calls if c.startswith("git ")]) == len([c for c in calls if c.startswith("sudo ")])
     d = docker_calls(calls)
     assert any(" pull" in c for c in d) and not any(" build" in c for c in d)
+
+
+# ── published-image deployments stay on the branch ────────────────────────────
+
+
+class TestStaysOnTheBranch:
+    """Parking on a release tag rewound these very scripts to that release's copy."""
+
+    def test_registry_deployment_never_checks_out_a_release_tag(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--version", "2.6.1", uid="1000")
+        assert proc.returncode == 0, proc.stderr
+        assert not any(" checkout " in c for c in calls), "must not move off the branch"
+        assert not any(" fetch " in c for c in calls), "tags are not needed"
+        assert any(c.endswith(f"pull {HTTPS} main") for c in calls)
+        assert "staying on main" in proc.stdout
+
+    def test_explicit_pull_flag_also_counts_as_a_published_image_deployment(self, tmp_path):
+        _, calls = run_update(tmp_path, "--version", "2.6.1", "--pull", uid="1000", compose=BUILD_COMPOSE)
+        assert not any(" checkout " in c for c in calls)
+
+    def test_a_checkout_left_on_an_old_tag_is_returned_to_the_branch_first(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--version", "2.6.1", uid="1000", fake_detached="1")
+        assert proc.returncode == 0, proc.stderr
+        git = [c for c in calls if c.startswith("git ")]
+        back = next(i for i, c in enumerate(git) if c.endswith("checkout main"))
+        pulled = next(i for i, c in enumerate(git) if " pull " in c)
+        assert back < pulled, "return to the branch before pulling"
+        assert "returning to main" in proc.stdout
+
+    def test_nothing_is_checked_out_when_already_on_the_branch(self, tmp_path):
+        _, calls = run_update(tmp_path, uid="1000")
+        assert not any(" checkout " in c for c in calls)
+
+    def test_also_works_without_a_version(self, tmp_path):
+        """A plain ./update.sh run from a checkout parked on a tag heals it too."""
+        _, calls = run_update(tmp_path, uid="1000", fake_detached="1")
+        assert any(c.endswith("checkout main") for c in calls)
+
+    def test_no_git_never_touches_the_checkout(self, tmp_path):
+        _, calls = run_update(tmp_path, "--no-git", uid="1000", fake_detached="1")
+        assert not any(" checkout " in c for c in calls)
+
+    def test_local_build_deployments_still_deploy_the_release_they_asked_for(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--version", "2.6.1", uid="1000", compose=BUILD_COMPOSE)
+        assert proc.returncode == 0, proc.stderr
+        assert any(c.endswith("checkout v2.6.1") for c in calls)
+        assert any(c.endswith(f"fetch --tags {HTTPS}") for c in calls)
+        assert "staying on main" not in proc.stdout
+
+    def test_local_build_deployments_are_not_pulled_back_to_the_branch(self, tmp_path):
+        _, calls = run_update(tmp_path, "--version", "2.6.1", uid="1000", compose=BUILD_COMPOSE, fake_detached="1")
+        assert not any(c.endswith("checkout main") for c in calls)
+
+
+# ── .git ownership repair ─────────────────────────────────────────────────────
+
+
+class TestGitOwnershipRepair:
+    def test_stray_files_are_handed_back_to_the_owner_before_git_runs(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, fake_stray="1", sudo_user="truenas_admin")
+        assert proc.returncode == 0, proc.stderr
+        chowns = [c for c in calls if c.startswith("chown")]
+        assert len(chowns) == 1 and chowns[0].startswith("chown -R amoote: ") and chowns[0].endswith("/.git")
+        first_git = next(i for i, c in enumerate(calls) if c.startswith("sudo"))
+        assert calls.index(chowns[0]) < first_git
+        assert "Restoring ownership" in proc.stdout
+
+    def test_nothing_is_changed_when_ownership_is_already_right(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, sudo_user="truenas_admin")
+        assert proc.returncode == 0, proc.stderr
+        assert not any(c.startswith("chown") for c in calls)
+
+    def test_not_root_never_touches_ownership(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, uid="1000", fake_stray="1")
+        assert not any(c.startswith(("chown", "find")) for c in calls)
+
+    def test_root_owned_checkout_is_left_alone(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, owner="root", fake_stray="1")
+        assert not any(c.startswith("chown") for c in calls)
+
+    def test_failed_repair_does_not_stop_the_update(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, fake_stray="1", fake_chown_fail="1")
+        assert proc.returncode == 0, proc.stderr
+        assert "Could not change ownership" in proc.stdout
+
+    def test_git_failure_explains_the_fix(self, tmp_path):
+        proc, _ = run_update(tmp_path, fake_https_fail="1", fake_origin_fail="1")
+        assert proc.returncode != 0
+        out = proc.stdout + proc.stderr
+        assert "git could not update" in out and "chown -R" in out
