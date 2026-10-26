@@ -125,6 +125,16 @@ if [[ -f "$ENV_FILE" ]]; then
     done < "$ENV_FILE"
 fi
 
+# Does the compose file build the image from this checkout (an active build:
+# section)?  Comment lines start with '#', so they don't match.
+compose_builds_locally() {
+    local cfg
+    if cfg="$(docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"; then
+        grep -qE '^[[:space:]]+build:' <<<"$cfg"
+    else
+        grep -qE '^[[:space:]]+build:' "$COMPOSE_FILE"   # comment lines start with '#', so they don't match
+    fi
+}
 # ── Rollback shortcut ──────────────────────────────────────────────────────────
 
 if [[ -n "$OPT_ROLLBACK_REV" ]]; then
@@ -136,16 +146,33 @@ fi
 
 # ── Git pull ───────────────────────────────────────────────────────────────────
 
+# Only a deployment that builds from this checkout needs the checkout to match
+# the release being installed.  One that runs the published image has no reason
+# to sit on a release tag — and doing so rewinds these very scripts to the older
+# release's copy (including any fix to them made since), so it stays on the branch.
+LOCAL_BUILD=false
+if [[ "$OPT_PULL" != true ]] && compose_builds_locally; then
+    LOCAL_BUILD=true
+fi
+
 if [[ "$OPT_NO_GIT" == false ]]; then
+    if [[ "$LOCAL_BUILD" == false ]] && ! _git symbolic-ref -q HEAD >/dev/null 2>&1; then
+        info "Checkout is parked on an old release tag — returning to $BRANCH so the update scripts stay current ..."
+        _git checkout "$BRANCH"
+    fi
     info "Pulling latest code (branch: $BRANCH) ..."
     git_pull_branch
 fi
 
 if [[ -n "$OPT_VERSION" ]]; then
-    info "Checking out tag/version: $OPT_VERSION ..."
-    git_fetch_tags
-    # Try v-prefixed tag first, then bare version.
-    _git checkout "v${OPT_VERSION}" 2>/dev/null || _git checkout "$OPT_VERSION"
+    if [[ "$LOCAL_BUILD" == true ]]; then
+        info "Checking out tag/version: $OPT_VERSION ..."
+        git_fetch_tags
+        # Try v-prefixed tag first, then bare version.
+        _git checkout "v${OPT_VERSION}" 2>/dev/null || _git checkout "$OPT_VERSION"
+    else
+        info "Deploying the published image — staying on $BRANCH so the update scripts stay current."
+    fi
 fi
 
 # ── Pre-flight DB migration test ───────────────────────────────────────────────
@@ -203,14 +230,6 @@ ROLLBACK_REV="$(_git rev-parse HEAD~1 2>/dev/null || true)"
 # compose file) can only be updated by pulling; "building" would silently do
 # nothing and the old image would keep running.  Decided after the git step so
 # it reflects the compose file of the version being deployed.
-compose_builds_locally() {
-    local cfg
-    if cfg="$(docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"; then
-        grep -qE '^[[:space:]]+build:' <<<"$cfg"
-    else
-        grep -qE '^[[:space:]]+build:' "$COMPOSE_FILE"   # comment lines start with '#', so they don't match
-    fi
-}
 if [[ "$OPT_PULL" != true ]] && ! compose_builds_locally; then
     info "docker-compose.yml uses a published image (no build: section) — pulling instead of building."
     OPT_PULL=true
