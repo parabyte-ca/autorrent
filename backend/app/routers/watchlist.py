@@ -48,7 +48,7 @@ async def create_watchlist_item(item: WatchlistCreate, db: Session = Depends(get
     db.commit()
     db.refresh(db_item)
     try:
-        await asyncio.wait_for(show_metadata.enrich_item(db_item), _ENRICH_TIMEOUT)
+        await asyncio.wait_for(show_metadata.enrich_item(db_item, show_metadata.tmdb_key(db)), _ENRICH_TIMEOUT)
         db.commit()
         db.refresh(db_item)
     except Exception as exc:  # timeout or lookup failure: the show is already saved
@@ -86,10 +86,11 @@ async def refresh_metadata(db: Session = Depends(get_db)):
     ]
     checked = matched = 0
     unavailable = False
+    key = show_metadata.tmdb_key(db)
     for n, item in enumerate(due[:_REFRESH_BATCH]):
         if n:
             await asyncio.sleep(_REFRESH_PACING)
-        result = await show_metadata.enrich_item(item)
+        result = await show_metadata.enrich_item(item, key)
         if result == show_metadata.UNAVAILABLE:
             unavailable = True
             break
@@ -139,9 +140,10 @@ async def get_episode_guide(item_id: int, db: Session = Depends(get_db)):
     item = db.query(WatchlistItem).filter(WatchlistItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    if not item.tvmaze_id:
+    if not item.tvmaze_id and not item.poster_url:
         # Shows added before TVMaze matching existed: try once now.
-        await show_metadata.enrich_item(item)
+        # (A poster without a TVMaze id means a movie matched on TMDB: no guide.)
+        await show_metadata.enrich_item(item, show_metadata.tmdb_key(db))
         db.commit()
     return await build_guide(db, item)
 

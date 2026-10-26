@@ -483,6 +483,8 @@ export const api = {
       req<{ success: boolean; message: string }>("/settings/test-qbit", { method: "POST" }),
     testPlex: (data: { url: string; token: string; library_key?: string }) =>
       req<PlexTestResult>("/settings/test-plex", { method: "POST", body: JSON.stringify(data) }),
+    testTmdb: (api_key: string) =>
+      req<{ ok: boolean; message: string }>("/settings/test-tmdb", { method: "POST", body: JSON.stringify({ api_key }) }),
     testJackett: (data: { url: string; api_key: string }) =>
       req<JackettTestResult>("/settings/test-jackett", { method: "POST", body: JSON.stringify(data) }),
     testJellyfin: (data: { url: string; api_key: string }) =>

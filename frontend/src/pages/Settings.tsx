@@ -446,6 +446,17 @@ export default function Settings() {
     } finally { setTraktBusy(null); }
   };
 
+  const [tmdbTesting, setTmdbTesting] = useState(false);
+  const [tmdbResult, setTmdbResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const testTmdb = async () => {
+    setTmdbTesting(true);
+    setTmdbResult(null);
+    try {
+      setTmdbResult(await api.settings.testTmdb((settings.tmdb_api_key ?? "").trim()));
+    } catch (err) {
+      setTmdbResult({ ok: false, message: err instanceof Error ? err.message : "Test failed." });
+    } finally { setTmdbTesting(false); }
+  };
   const [jackettTesting, setJackettTesting] = useState(false);
   const [jackettResult, setJackettResult] = useState<JackettTestResult | null>(null);
   const testJackett = async () => {
@@ -866,6 +877,36 @@ export default function Settings() {
               onChange={(v) => set("browse_country", v.toUpperCase().slice(0, 2))}
               placeholder="US"
             />
+          </div>
+          <p className="mb-3 mt-5 text-xs text-gray-500 dark:text-gray-400">
+            Posters for movies come from TMDB, which needs your own free API key
+            (themoviedb.org → Settings → API). Paste either the "API Key" or the "API Read Access Token".
+            Leave blank to show posters for TV shows only.
+          </p>
+          <div className="sm:max-w-md">
+            <Field
+              label="TMDB API key"
+              value={settings.tmdb_api_key ?? ""}
+              onChange={(v) => { set("tmdb_api_key", v); setTmdbResult(null); }}
+              placeholder="32-character key or read access token"
+              autoComplete="off"
+            />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              onClick={testTmdb}
+              disabled={tmdbTesting || !(settings.tmdb_api_key ?? "").trim()}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            >
+              {tmdbTesting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Test key
+            </button>
+            {tmdbResult && (
+              <span className={`flex items-center gap-1 text-sm ${tmdbResult.ok ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {tmdbResult.ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                {tmdbResult.message}
+              </span>
+            )}
           </div>
         </Section>
 

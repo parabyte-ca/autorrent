@@ -4,7 +4,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from . import tvmaze
+from . import tmdb, tvmaze
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,13 @@ def apply_show(item, show: dict) -> None:
     item.summary = clean_summary(show.get("summary")) or item.summary
     item.network = network_name(show) or item.network
     item.premiered = show.get("premiered") or item.premiered
+
+
+def apply_movie(item, movie: dict) -> None:
+    """Copy TMDB details onto a WatchlistItem (never touches download settings)."""
+    item.poster_url = tmdb.poster_url(movie) or item.poster_url
+    item.summary = clean_summary(movie.get("overview")) or item.summary
+    item.premiered = movie.get("release_date") or item.premiered
 
 
 FOUND = "found"
@@ -153,14 +160,17 @@ def metadata_due(item, now: datetime | None = None) -> bool:
     return (now or datetime.now(timezone.utc)) - checked >= wait
 
 
-async def enrich_item(item) -> str:
-    """Look the show up on TVMaze and fill in metadata.
+async def enrich_item(item, tmdb_key: str | None = None) -> str:
+    """Look the title up — TVMaze for shows, then TMDB for movies — and fill in metadata.
 
-    Returns FOUND, NOT_FOUND (TVMaze answered: no such show) or UNAVAILABLE
-    (it could not answer — network, rate limit, outage).  Only an actual answer
-    is recorded, so a temporary failure is retried instead of being remembered
-    as "this show has no poster".  Never raises: metadata is cosmetic.
+    Returns FOUND, NOT_FOUND (the sources answered: no such title) or UNAVAILABLE
+    (one could not answer — network, rate limit, outage, bad key).  Only an actual
+    answer is recorded, so a temporary failure is retried instead of being
+    remembered as "this title has no poster".  Never raises: metadata is cosmetic.
+
+    TMDB is only asked when ``tmdb_key`` is given and TVMaze has no such show.
     """
+    movie = None
     try:
         show = None
         if item.tvmaze_id:
@@ -174,12 +184,48 @@ async def enrich_item(item) -> str:
         logger.warning("Metadata lookup failed for %r: %s", item.title, exc)
         return UNAVAILABLE
 
+    if show is None and tmdb_key:
+        try:
+            movie = await find_movie(tmdb_key, [item.search_query, item.title])
+        except tmdb.TMDBUnavailable as exc:
+            logger.warning("TMDB unavailable while looking up %r: %s", item.title, exc)
+            return UNAVAILABLE
+        except Exception as exc:
+            logger.warning("Movie lookup failed for %r: %s", item.title, exc)
+            return UNAVAILABLE
+
     item.metadata_checked_at = datetime.now(timezone.utc)
     if show is not None:
         apply_show(item, show)
+    elif movie is not None:
+        apply_movie(item, movie)
     # Count consecutive lookups that produced no poster, to back off retries.
     item.metadata_attempts = 0 if item.poster_url else (item.metadata_attempts or 0) + 1
-    return FOUND if show is not None else NOT_FOUND
+    return FOUND if (show is not None or movie is not None) else NOT_FOUND
+
+
+async def find_movie(key: str, texts: list[str | None]) -> dict | None:
+    """Find a movie from candidate titles (tried in order). Raises tmdb.TMDBUnavailable."""
+    tried: set[tuple[str, int | None]] = set()
+    for text in texts:
+        if not text or not text.strip():
+            continue
+        name, year = parse_title(text)
+        if (name.lower(), year) in tried:
+            continue
+        tried.add((name.lower(), year))
+        movie = await tmdb.search_movie(key, name, year)
+        if movie:
+            return movie
+    return None
+
+
+def tmdb_key(db) -> str | None:
+    """The saved TMDB key if it looks valid, else None (movie lookups are then skipped)."""
+    from ..models import Setting
+    row = db.query(Setting).filter(Setting.key == "tmdb_api_key").first()
+    key = (row.value if row else "") or ""
+    return key.strip() if tmdb.valid_key(key.strip()) else None
 
 
 def starting_point(episodes: list[dict] | None, status: str | None, mode: str | None,

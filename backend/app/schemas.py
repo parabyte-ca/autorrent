@@ -176,6 +176,10 @@ class TraktTestRequest(BaseModel):
     username: str
 
 
+class TmdbTestRequest(BaseModel):
+    api_key: str
+
+
 class JackettTestRequest(BaseModel):
     url: str
     api_key: str
