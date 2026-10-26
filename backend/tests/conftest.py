@@ -22,3 +22,11 @@ def _no_real_tvmaze(monkeypatch):
     from app.services import tvmaze
 
     monkeypatch.setattr(tvmaze, "_BASE", "http://tvmaze.invalid")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tmdb(monkeypatch):
+    """Same for TMDB."""
+    from app.services import tmdb
+
+    monkeypatch.setattr(tmdb, "_BASE", "http://tmdb.invalid")

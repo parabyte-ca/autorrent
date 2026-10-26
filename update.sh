@@ -8,9 +8,10 @@
 #   bash update.sh --version 2.5.0 [--pull] [--skip-preflight]
 #
 # Options:
-#   --version <semver>    Tag/version to deploy (used by upgrade-agent).
-#                         Without this the script deploys whatever HEAD resolves to
-#                         after the git pull.
+#   --version <semver>    Release to deploy (used by upgrade-agent), also to go
+#                         back to an older one. A published-image deployment
+#                         pins that exact image (AUTORRENT_VERSION in .env);
+#                         without this it installs the newest release and pins it.
 #   --pull                Do a docker pull (for registry-based deployments) instead
 #                         of a local build.  Chosen automatically when the compose
 #                         file has no active build: section.
@@ -62,13 +63,22 @@ cd "$REPO_DIR"
 #   * root has none of that user's SSH keys.
 # This matters most when the upgrade helper runs us from cron, where there is
 # no SUDO_USER and no login name to fall back on.
-_GIT_USER=""
+_GIT_USER=""        # name (or numeric id) for find/chown
+_GIT_SUDO=""        # the same, as sudo -u wants it ("#568" for a bare id)
 if [[ "$(id -u)" -eq 0 ]]; then
     _owner="$(stat -c %U "$REPO_DIR" 2>/dev/null || true)"
+    _owner_id="$(stat -c %u "$REPO_DIR" 2>/dev/null || true)"
     if [[ -n "$_owner" && "$_owner" != "root" && "$_owner" != "UNKNOWN" ]]; then
         _GIT_USER="$_owner"
+        _GIT_SUDO="$_owner"
+    elif [[ "$_owner" == "UNKNOWN" && "$_owner_id" =~ ^[0-9]+$ && "$_owner_id" != "0" ]]; then
+        # The owner has no name on this host (e.g. an app/container UID): use the number.
+        # Falling through to root would make git refuse with "dubious ownership".
+        _GIT_USER="$_owner_id"
+        _GIT_SUDO="#$_owner_id"
     elif [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
         _GIT_USER="$SUDO_USER"
+        _GIT_SUDO="$SUDO_USER"
     fi
     if [[ -n "$_GIT_USER" ]] && ! command -v sudo &>/dev/null; then
         die "sudo is required to run git as $_GIT_USER (the owner of $REPO_DIR)."
@@ -79,7 +89,7 @@ fi
 # nobody can type (cron, the upgrade helper).
 _git() {
     if [[ -n "$_GIT_USER" ]]; then
-        sudo -H -u "$_GIT_USER" env GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" "$@"
+        sudo -H -u "$_GIT_SUDO" env GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" "$@"
     else
         GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" "$@"
     fi
@@ -151,6 +161,53 @@ compose_builds_locally() {
         grep -qE '^[[:space:]]+build:' "$COMPOSE_FILE"   # comment lines start with '#', so they don't match
     fi
 }
+# ── Version pinning (published-image deployments) ──────────────────────────────
+# docker-compose.yml's image tag is ${AUTORRENT_VERSION:-latest}.  We pin it to the
+# release we install, so the previous release's exact image is always known and a
+# failed upgrade (or a bad release) can go back to it — "latest" cannot.
+
+valid_semver() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+
+# APP_VERSION baked into an image / running container (the first arg of the
+# docker command says which: "image inspect <ref>" or "inspect <container>").
+_app_version() {
+    sed -n 's/^APP_VERSION=//p' | head -1
+}
+image_version() {
+    docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$1" 2>/dev/null | _app_version
+}
+running_version() {
+    local cid
+    cid="$(docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null | head -1)"
+    [[ -n "$cid" ]] || return 0
+    docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null | _app_version
+}
+pinned_version() {
+    [[ -f "$ENV_FILE" ]] || return 0
+    sed -n 's/^[[:space:]]*AUTORRENT_VERSION=//p' "$ENV_FILE" | tail -1 | tr -d "\"' "
+}
+
+# Forget a pin (so a stale one cannot hold the install back on an old release).
+clear_pin() {
+    [[ -f "$ENV_FILE" ]] || return 0
+    local kept
+    kept="$(grep -v '^[[:space:]]*AUTORRENT_VERSION=' "$ENV_FILE" || true)"
+    if [[ -n "$kept" ]]; then printf '%s\n' "$kept" > "$ENV_FILE"; else : > "$ENV_FILE"; fi
+}
+
+# Record the version in .env (created if missing), keeping the file's owner/mode.
+write_pin() {
+    local version="$1" kept
+    kept="$(grep -v '^[[:space:]]*AUTORRENT_VERSION=' "$ENV_FILE" 2>/dev/null || true)"
+    if [[ -f "$ENV_FILE" ]]; then
+        { [[ -n "$kept" ]] && printf '%s\n' "$kept"; printf 'AUTORRENT_VERSION=%s\n' "$version"; } > "$ENV_FILE"
+    else
+        printf 'AUTORRENT_VERSION=%s\n' "$version" > "$ENV_FILE"
+        [[ -n "$_GIT_USER" ]] && chown "$_GIT_USER:" "$ENV_FILE" 2>/dev/null || true
+    fi
+    export AUTORRENT_VERSION="$version"
+}
+
 # ── Rollback shortcut ──────────────────────────────────────────────────────────
 
 if [[ -n "$OPT_ROLLBACK_REV" ]]; then
@@ -251,7 +308,41 @@ if [[ "$OPT_PULL" != true ]] && ! compose_builds_locally; then
     OPT_PULL=true
 fi
 
-if [[ "$OPT_PULL" == true ]]; then
+# Published image + a compose file that takes AUTORRENT_VERSION: install (and pin)
+# an exact release.  Anything else keeps the old behaviour (pull "latest" / build).
+PINNING=false
+PREV_VERSION=""
+if [[ "$OPT_PULL" == true ]] && grep -q 'AUTORRENT_VERSION' "$COMPOSE_FILE" 2>/dev/null; then
+    PINNING=true
+    OPT_VERSION="${OPT_VERSION#v}"
+    if [[ -n "$OPT_VERSION" ]] && ! valid_semver "$OPT_VERSION"; then
+        die "Invalid version '$OPT_VERSION' (expected X.Y.Z)."
+    fi
+    PREV_VERSION="$(running_version || true)"
+    valid_semver "$PREV_VERSION" || PREV_VERSION="$(pinned_version || true)"
+    valid_semver "$PREV_VERSION" || PREV_VERSION=""
+fi
+
+if [[ "$PINNING" == true ]]; then
+    export AUTORRENT_VERSION="${OPT_VERSION:-latest}"
+    info "Pulling Docker image (${AUTORRENT_VERSION}) ..."
+    docker compose -f "$COMPOSE_FILE" pull
+    if [[ -z "$OPT_VERSION" ]]; then
+        # Newest release: pin to the version the pulled image says it is.
+        _ref="$(docker compose -f "$COMPOSE_FILE" config --images 2>/dev/null | head -1)"
+        _got="$(image_version "$_ref" || true)"
+        if valid_semver "$_got"; then
+            OPT_VERSION="$_got"
+        else
+            info "Could not read the version of the pulled image — leaving the image tag on 'latest' (no rollback pin)."
+            clear_pin
+        fi
+    fi
+    if [[ -n "$OPT_VERSION" ]]; then
+        write_pin "$OPT_VERSION"
+        info "Pinned image version to $OPT_VERSION${PREV_VERSION:+ (previous: $PREV_VERSION)}."
+    fi
+elif [[ "$OPT_PULL" == true ]]; then
     info "Pulling latest Docker image ..."
     docker compose -f "$COMPOSE_FILE" pull
 else
@@ -265,15 +356,22 @@ info "Restarting container ..."
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
 
 info "Waiting for health check ..."
+HEALTH_TRIES="${HEALTH_TRIES:-30}"
 TRIES=0
-until docker compose -f "$COMPOSE_FILE" ps | grep -q "healthy" || [[ $TRIES -ge 30 ]]; do
+until docker compose -f "$COMPOSE_FILE" ps | grep -q "healthy" || [[ $TRIES -ge $HEALTH_TRIES ]]; do
     sleep 2
     TRIES=$((TRIES + 1))
 done
 
-if [[ $TRIES -ge 30 ]]; then
+if [[ $TRIES -ge $HEALTH_TRIES ]]; then
     info "Container did not become healthy in time."
-    if [[ -n "$ROLLBACK_REV" ]]; then
+    if [[ "$PINNING" == true && -n "$PREV_VERSION" ]]; then
+        info "Rolling back to the previous release ($PREV_VERSION) ..."
+        write_pin "$PREV_VERSION"
+        docker compose -f "$COMPOSE_FILE" pull || true
+        docker compose -f "$COMPOSE_FILE" up -d --remove-orphans || true
+        info "Rollback complete — running $PREV_VERSION. Remove AUTORRENT_VERSION from .env to follow 'latest' again."
+    elif [[ -n "$ROLLBACK_REV" ]]; then
         info "Attempting automatic rollback to $ROLLBACK_REV ..."
         _git checkout "$ROLLBACK_REV" -- .
         if [[ "$OPT_PULL" == true ]]; then

@@ -515,6 +515,110 @@ class TestRequestUpgrade:
         assert "requested_at" in req
 
 
+# ── rollback ──────────────────────────────────────────────────────────────────
+
+
+def _helper_up(upgrade_dir):
+    _write(upgrade_dir, "agent.json", {
+        "last_seen": datetime.now(timezone.utc).isoformat(), "every_minutes": 15,
+    })
+
+
+def _request(db_session, upgrade_dir, current, version, **kw):
+    with patch("app.services.updater._get_folder", return_value=upgrade_dir), \
+         patch("app.services.updater.get_current_version", return_value=current), \
+         patch("app.services.updater.notify"):
+        request_upgrade(db_session, version, "admin", **kw)
+
+
+def _status(db_session, upgrade_dir, current):
+    from app.services.updater import get_status
+    with patch("app.services.updater._get_folder", return_value=upgrade_dir), \
+         patch("app.services.updater.get_current_version", return_value=current):
+        return get_status(db_session)
+
+
+class TestRollback:
+    def test_an_upgrade_remembers_the_version_it_replaced(self, db_session, upgrade_dir):
+        _seed_cache(db_session, version="2.7.0")
+        _helper_up(upgrade_dir)
+        _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        os.remove(os.path.join(upgrade_dir, "request.json"))   # the helper picked it up
+        # ...and once running 2.7.0, the status offers going back to 2.6.1
+        st = _status(db_session, upgrade_dir, "2.7.0")
+        assert st["previous_version"] == "2.6.1" and st["can_rollback"] is True
+
+    def test_nothing_to_roll_back_before_any_upgrade(self, db_session, upgrade_dir):
+        _helper_up(upgrade_dir)
+        st = _status(db_session, upgrade_dir, "2.7.0")
+        assert st["previous_version"] is None and st["can_rollback"] is False
+
+    def test_no_rollback_offered_when_the_upgrade_never_took_effect(self, db_session, upgrade_dir):
+        _seed_cache(db_session, version="2.7.0")
+        _helper_up(upgrade_dir)
+        _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        # still (or automatically back) on 2.6.1: nothing older to go to
+        st = _status(db_session, upgrade_dir, "2.6.1")
+        assert st["previous_version"] is None and st["can_rollback"] is False
+
+    def test_rollback_requests_the_previous_version(self, db_session, upgrade_dir):
+        _seed_cache(db_session, version="2.7.0")
+        _helper_up(upgrade_dir)
+        _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        os.remove(os.path.join(upgrade_dir, "request.json"))
+
+        _request(db_session, upgrade_dir, "2.7.0", "2.6.1", rollback=True)
+
+        with open(os.path.join(upgrade_dir, "request.json")) as f:
+            assert json.load(f)["version"] == "2.6.1"
+        # the recorded previous version is kept, not overwritten with 2.7.0
+        assert _status(db_session, upgrade_dir, "2.6.1")["previous_version"] is None
+
+    def test_rollback_to_any_other_version_is_refused(self, db_session, upgrade_dir):
+        _seed_cache(db_session, version="2.7.0")
+        _helper_up(upgrade_dir)
+        _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        os.remove(os.path.join(upgrade_dir, "request.json"))
+        with pytest.raises(ValueError, match="not the previous version"):
+            _request(db_session, upgrade_dir, "2.7.0", "2.5.0", rollback=True)
+        assert not os.path.exists(os.path.join(upgrade_dir, "request.json"))
+
+    def test_rollback_without_history_is_refused(self, db_session, upgrade_dir):
+        _helper_up(upgrade_dir)
+        with pytest.raises(ValueError, match="no earlier version"):
+            _request(db_session, upgrade_dir, "2.7.0", "2.6.1", rollback=True)
+
+    def test_rollback_still_needs_the_helper_and_no_upgrade_running(self, db_session, upgrade_dir):
+        _seed_cache(db_session, version="2.7.0")
+        _helper_up(upgrade_dir)
+        _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        # request.json from the upgrade is still pending -> in progress
+        with pytest.raises(ValueError, match="already in progress"):
+            _request(db_session, upgrade_dir, "2.7.0", "2.6.1", rollback=True)
+        os.remove(os.path.join(upgrade_dir, "request.json"))
+        os.remove(os.path.join(upgrade_dir, "agent.json"))
+        with pytest.raises(ValueError, match="not connected"):
+            _request(db_session, upgrade_dir, "2.7.0", "2.6.1", rollback=True)
+
+    def test_a_failed_validation_does_not_overwrite_the_recorded_version(self, db_session, upgrade_dir):
+        _seed_cache(db_session, version="2.7.0")
+        with pytest.raises(ValueError):          # helper not connected
+            _request(db_session, upgrade_dir, "2.6.1", "2.7.0")
+        assert _status(db_session, upgrade_dir, "2.7.0")["previous_version"] is None
+
+    def test_endpoint_passes_the_rollback_flag(self, client, upgrade_dir):
+        with patch("app.services.updater._get_folder", return_value=upgrade_dir), \
+             patch("app.services.updater.request_upgrade") as req:
+            client.post("/admin/updates/upgrade", json={"version": "2.6.1", "rollback": True})
+            client.post("/admin/updates/upgrade", json={"version": "2.6.1", "rollback": "yes"})
+        assert req.call_args_list[0].kwargs == {"rollback": True}
+        assert req.call_args_list[1].kwargs == {"rollback": False}
+
+    def test_previous_version_is_never_exposed_as_a_setting(self):
+        from app.routers.settings import _PRIVATE_KEYS
+        assert "update_previous_version" in _PRIVATE_KEYS
+
+
 # ── HTTP endpoints ────────────────────────────────────────────────────────────
 
 

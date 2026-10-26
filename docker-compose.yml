@@ -1,6 +1,8 @@
 services:
   autorrent:
-    image: ghcr.io/parabyte-ca/autorrent:latest
+    # update.sh pins AUTORRENT_VERSION (in .env) to the release it installs, so a
+    # bad release can be rolled back to the exact previous image. Unset = latest.
+    image: ghcr.io/parabyte-ca/autorrent:${AUTORRENT_VERSION:-latest}
     # build: .        # uncomment to build locally instead of pulling from registry
     container_name: autorrent
     ports:

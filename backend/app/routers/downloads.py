@@ -22,6 +22,19 @@ router = APIRouter()
 _GRACE_PERIOD = timedelta(seconds=60)
 
 
+def _grace_elapsed(first_seen: datetime | None) -> bool:
+    """True once the post-completion grace period has passed.
+
+    SQLite hands datetimes back naive (they are stored as UTC), so make the
+    value timezone-aware before comparing it with now.
+    """
+    if first_seen is None:
+        return False
+    if first_seen.tzinfo is None:
+        first_seen = first_seen.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - first_seen >= _GRACE_PERIOD
+
+
 def _fire_media_refresh(settings_dict: dict) -> None:
     """Spawn a daemon thread to run the media refresh without blocking the response."""
     def _run():
@@ -153,9 +166,7 @@ def get_downloads(db: Session = Depends(get_db)):
                             d.title, d.torrent_hash,
                         )
                         db.commit()
-                    elif (d.status == "completed"
-                            and d.completion_first_seen_at is not None
-                            and datetime.now(timezone.utc) - d.completion_first_seen_at >= _GRACE_PERIOD):
+                    elif d.status == "completed" and _grace_elapsed(d.completion_first_seen_at):
                         d.qbit_removed = True
                         logger.info(
                             "Torrent '%s' (%s) absent from qBittorrent — marking removed.",
@@ -185,9 +196,7 @@ def get_downloads(db: Session = Depends(get_db)):
                         db.commit()
 
                         # After grace period: fire hooks then remove from qBittorrent.
-                        if (d.completion_first_seen_at is not None
-                                and not d.qbit_removed
-                                and datetime.now(timezone.utc) - d.completion_first_seen_at >= _GRACE_PERIOD):
+                        if not d.qbit_removed and _grace_elapsed(d.completion_first_seen_at):
 
                             # 1. Plex / Jellyfin library refresh
                             if _settings_cache is None:

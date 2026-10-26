@@ -334,6 +334,8 @@ export interface UpdateStatus {
   upgrade_state: "requested" | "running" | "succeeded" | "failed" | null;
   upgrade_message: string | null;
   can_upgrade: boolean;
+  previous_version: string | null;
+  can_rollback: boolean;
   helper_install_cmd: string;
   upgrade_log?: string;
 }
@@ -468,10 +470,10 @@ export const api = {
   updates: {
     status: () => req<UpdateStatus>("/admin/updates"),
     check: () => req<UpdateStatus>("/admin/updates/check", { method: "POST" }),
-    upgrade: (version: string) =>
+    upgrade: (version: string, rollback = false) =>
       req<UpdateStatus>("/admin/updates/upgrade", {
         method: "POST",
-        body: JSON.stringify({ version }),
+        body: JSON.stringify({ version, rollback }),
       }),
   },
 
@@ -483,6 +485,8 @@ export const api = {
       req<{ success: boolean; message: string }>("/settings/test-qbit", { method: "POST" }),
     testPlex: (data: { url: string; token: string; library_key?: string }) =>
       req<PlexTestResult>("/settings/test-plex", { method: "POST", body: JSON.stringify(data) }),
+    testTmdb: (api_key: string) =>
+      req<{ ok: boolean; message: string }>("/settings/test-tmdb", { method: "POST", body: JSON.stringify({ api_key }) }),
     testJackett: (data: { url: string; api_key: string }) =>
       req<JackettTestResult>("/settings/test-jackett", { method: "POST", body: JSON.stringify(data) }),
     testJellyfin: (data: { url: string; api_key: string }) =>

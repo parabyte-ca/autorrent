@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Setting
-from ..schemas import DigestTestRequest, JackettTestRequest, JellyfinTestRequest, PlexTestRequest
+from ..models import Setting, WatchlistItem
+from ..schemas import DigestTestRequest, TmdbTestRequest, JackettTestRequest, JellyfinTestRequest, PlexTestRequest
 from ..services.indexers.jackett import probe_jackett
+from ..services import tmdb
 from ..services.qbittorrent import test_connection
 from ..services.scheduler import reschedule_digest, update_interval
 
@@ -27,6 +28,8 @@ DEFAULTS: dict[str, str] = {
     "jackett_url": "",
     "jackett_api_key": "",
     "apprise_url": "",
+    # Movie posters (TV posters come from TVMaze, which needs no key)
+    "tmdb_api_key": "",
     # Alerts (each is "true"/"false")
     "notify_on_grab": "true",
     "notify_on_complete": "true",
@@ -80,6 +83,7 @@ _PRIVATE_KEYS = {
     "last_digest_sent_at",
     "update_release_cache",
     "update_notified_version",
+    "update_previous_version",
     "disk_warned",
     "trakt_last_result",
 }
@@ -92,6 +96,16 @@ def _load_settings(db: Session) -> dict[str, str]:
         if s.key not in _PRIVATE_KEYS
     }
     return {**DEFAULTS, **db_settings}
+
+
+def _recheck_movie_posters(db: Session, key: str) -> None:
+    """A newly saved TMDB key makes posterless titles worth another look right away."""
+    if not tmdb.valid_key(key):
+        return
+    db.query(WatchlistItem).filter(
+        WatchlistItem.poster_url.is_(None), WatchlistItem.tvmaze_id.is_(None),
+    ).update({"metadata_checked_at": None, "metadata_attempts": 0}, synchronize_session=False)
+    db.commit()
 
 
 @router.get("/settings")
@@ -112,6 +126,9 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
             db.add(Setting(key=key, value=str_val))
     db.commit()
 
+    if "tmdb_api_key" in updates:
+        _recheck_movie_posters(db, str(updates["tmdb_api_key"] or "").strip())
+
     if "scan_interval_minutes" in updates:
         try:
             update_interval(int(updates["scan_interval_minutes"]))
@@ -129,6 +146,12 @@ def update_settings(updates: dict, db: Session = Depends(get_db)):
             pass
 
     return _load_settings(db)
+
+
+@router.post("/settings/test-tmdb")
+async def test_tmdb(body: TmdbTestRequest):
+    ok, message = await tmdb.check_key(body.api_key.strip())
+    return {"ok": ok, "message": message}
 
 
 @router.post("/settings/test-qbit")

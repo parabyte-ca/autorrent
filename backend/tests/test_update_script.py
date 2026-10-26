@@ -29,6 +29,9 @@ BUILD_COMPOSE = textwrap.dedent("""\
         build: .
 """)
 
+PINNABLE_COMPOSE = REGISTRY_COMPOSE.replace(
+    "autorrent:latest", "autorrent:${AUTORRENT_VERSION:-latest}")
+
 SSH_REMOTE = "git@github.com:parabyte-ca/autorrent.git"
 HTTPS = "https://github.com/parabyte-ca/autorrent.git"
 
@@ -46,11 +49,31 @@ exit 0
 ''',
     "docker": r'''#!/usr/bin/env bash
 echo "docker $*" >> "$FAKE_LOG"
+case "$*" in
+    *" pull"*|*" up "*) echo "docker-env AUTORRENT_VERSION=${AUTORRENT_VERSION:-<unset>} $*" >> "$FAKE_LOG" ;;
+esac
+if [[ "$*" == "image inspect "* ]]; then
+    echo "PATH=/usr/bin"
+    [[ -n "${FAKE_IMAGE_VERSION:-}" ]] && echo "APP_VERSION=$FAKE_IMAGE_VERSION"
+    exit 0
+fi
+if [[ "$*" == "inspect "* ]]; then
+    echo "PATH=/usr/bin"
+    [[ -n "${FAKE_RUNNING_VERSION:-}" ]] && echo "APP_VERSION=$FAKE_RUNNING_VERSION"
+    exit 0
+fi
+if [[ "$*" == *" config --images"* ]]; then echo "ghcr.io/parabyte-ca/autorrent:${AUTORRENT_VERSION:-latest}"; exit 0; fi
 if [[ "$*" == *" config"* ]]; then
     [[ -n "${FAKE_DOCKER_CONFIG_FAIL:-}" ]] && exit 1
     cat "$FAKE_COMPOSE_FILE"; exit 0
 fi
-if [[ "$*" == *" ps"* ]]; then echo "autorrent   Up 3 seconds (healthy)"; fi
+if [[ "$*" == *" ps -q"* ]]; then [[ -n "${FAKE_RUNNING_VERSION:-}" ]] && echo "cid123"; exit 0; fi
+if [[ "$*" == *" ps"* ]]; then
+    if [[ -n "${FAKE_UNHEALTHY:-}" ]]; then echo "autorrent   Up 3 seconds (health: starting)"; else echo "autorrent   Up 3 seconds (healthy)"; fi
+fi
+exit 0
+''',
+    "sleep": r'''#!/usr/bin/env bash
 exit 0
 ''',
     # Strips "-H -u USER" and runs the rest, but records who it was run as.
@@ -63,7 +86,7 @@ exec "$@"
 echo "${FAKE_UID:-0}"
 ''',
     "stat": r'''#!/usr/bin/env bash
-echo "${FAKE_OWNER:-root}"
+if [[ "$*" == *"%u"* ]]; then echo "${FAKE_OWNER_ID:-1000}"; else echo "${FAKE_OWNER:-root}"; fi
 ''',
     # Reports a stray (wrongly owned) file inside .git when FAKE_STRAY is set.
     "find": r'''#!/usr/bin/env bash
@@ -120,7 +143,8 @@ def run_update(tmp_path, *args, compose=REGISTRY_COMPOSE, uid="0", owner="amoote
 
 
 def docker_calls(calls):
-    return [c for c in calls if c.startswith("docker ") and " config" not in c and " ps" not in c]
+    return [c for c in calls
+            if c.startswith("docker ") and " config" not in c and " ps" not in c and " inspect" not in c]
 
 
 # ── pull vs build ─────────────────────────────────────────────────────────────
@@ -373,3 +397,146 @@ class TestGitOwnershipRepair:
         assert proc.returncode != 0
         out = proc.stdout + proc.stderr
         assert "git could not update" in out and "chown -R" in out
+
+
+# ── version pinning and rollback (published image) ────────────────────────────
+
+
+def _env(tmp_path):
+    f = tmp_path / "repo" / ".env"
+    return f.read_text() if f.exists() else None
+
+
+def _pins(calls):
+    """AUTORRENT_VERSION seen by each docker pull / up, in order."""
+    return [(("pull" if " pull" in c else "up"), c.split()[1].split("=")[1])
+            for c in calls if c.startswith("docker-env")]
+
+
+def _seed_env(tmp_path, text):
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    (repo / ".env").write_text(text)
+
+
+class TestVersionPinning:
+    def test_explicit_version_installs_and_pins_that_exact_image(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0",
+                                 compose=PINNABLE_COMPOSE, fake_running_version="2.6.1")
+        assert proc.returncode == 0, proc.stderr
+        assert _pins(calls) == [("pull", "2.7.0"), ("up", "2.7.0")]
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.7.0\n"
+        assert "previous: 2.6.1" in proc.stdout
+
+    def test_a_v_prefix_is_accepted(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "v2.7.0", compose=PINNABLE_COMPOSE)
+        assert proc.returncode == 0, proc.stderr
+        assert _pins(calls)[0] == ("pull", "2.7.0")
+
+    def test_going_back_to_an_older_release_works_the_same_way(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.5.0",
+                                 compose=PINNABLE_COMPOSE, fake_running_version="2.6.1")
+        assert proc.returncode == 0, proc.stderr
+        assert _pins(calls) == [("pull", "2.5.0"), ("up", "2.5.0")]
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.5.0\n"
+
+    def test_no_version_pulls_latest_then_pins_what_it_turned_out_to_be(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", compose=PINNABLE_COMPOSE,
+                                 fake_image_version="2.6.2", fake_running_version="2.6.1")
+        assert proc.returncode == 0, proc.stderr
+        assert _pins(calls) == [("pull", "latest"), ("up", "2.6.2")]
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.6.2\n"
+
+    def test_a_stale_pin_does_not_hold_back_a_plain_update(self, tmp_path):
+        _seed_env(tmp_path, "AUTORRENT_VERSION=2.4.0\n")
+        proc, calls = run_update(tmp_path, "--no-git", compose=PINNABLE_COMPOSE, fake_image_version="2.6.2")
+        assert _pins(calls)[0] == ("pull", "latest")
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.6.2\n"
+
+    def test_unreadable_image_version_means_no_pin_and_clears_the_old_one(self, tmp_path):
+        _seed_env(tmp_path, "FOO=bar\nAUTORRENT_VERSION=2.4.0\n")
+        proc, calls = run_update(tmp_path, "--no-git", compose=PINNABLE_COMPOSE)
+        assert proc.returncode == 0, proc.stderr
+        assert _pins(calls) == [("pull", "latest"), ("up", "latest")]
+        assert _env(tmp_path) == "FOO=bar\n"
+
+    def test_other_env_lines_survive_and_there_is_only_one_pin(self, tmp_path):
+        _seed_env(tmp_path, "APP_UPGRADE_FOLDER=/up\nAUTORRENT_VERSION=2.4.0\n# note\n")
+        run_update(tmp_path, "--no-git", "--version", "2.7.0", compose=PINNABLE_COMPOSE)
+        text = _env(tmp_path)
+        assert text.count("AUTORRENT_VERSION") == 1 and "AUTORRENT_VERSION=2.7.0" in text
+        assert "APP_UPGRADE_FOLDER=/up" in text and "# note" in text
+
+    def test_a_new_env_file_belongs_to_the_checkout_owner(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0",
+                                 compose=PINNABLE_COMPOSE, sudo_user="truenas_admin")
+        assert any(c.startswith("chown amoote: ") and c.endswith("/.env") for c in calls)
+
+    @pytest.mark.parametrize("bad", ["latest", "2.7", "2.7.0;rm -rf /", "../2.7.0", "2.7.0-rc1"])
+    def test_a_bad_version_is_refused_before_anything_is_pulled(self, tmp_path, bad):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", bad, compose=PINNABLE_COMPOSE)
+        assert proc.returncode != 0
+        assert not docker_calls(calls) and _env(tmp_path) is None
+
+    def test_a_compose_file_without_the_variable_keeps_the_old_behaviour(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0")   # REGISTRY_COMPOSE
+        assert proc.returncode == 0, proc.stderr
+        assert _env(tmp_path) is None
+        assert not any(c.startswith("docker-env") and "<unset>" not in c for c in calls)
+
+    def test_local_build_deployments_are_never_pinned(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", compose=BUILD_COMPOSE + "# AUTORRENT_VERSION\n")
+        assert proc.returncode == 0, proc.stderr
+        assert _env(tmp_path) is None
+
+
+class TestRollback:
+    def test_unhealthy_upgrade_goes_back_to_the_previous_release(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0", compose=PINNABLE_COMPOSE,
+                                 fake_running_version="2.6.1", fake_unhealthy="1", health_tries="2")
+        assert proc.returncode != 0
+        assert _pins(calls)[-2:] == [("pull", "2.6.1"), ("up", "2.6.1")]
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.6.1\n"
+        assert "Rollback complete" in proc.stdout
+
+    def test_previous_release_falls_back_to_the_pin_when_nothing_is_running(self, tmp_path):
+        _seed_env(tmp_path, "AUTORRENT_VERSION=2.6.0\n")
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0", compose=PINNABLE_COMPOSE,
+                                 fake_unhealthy="1", health_tries="2")
+        assert proc.returncode != 0
+        assert _pins(calls)[-1] == ("up", "2.6.0")
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.6.0\n"
+
+    def test_healthy_upgrade_does_not_roll_back(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0", compose=PINNABLE_COMPOSE,
+                                 fake_running_version="2.6.1")
+        assert "Rolling back" not in proc.stdout
+        assert _pins(calls)[-1] == ("up", "2.7.0")
+
+    def test_without_a_known_previous_release_nothing_is_guessed(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", "--version", "2.7.0", compose=PINNABLE_COMPOSE,
+                                 fake_unhealthy="1", health_tries="2")
+        assert proc.returncode != 0
+        assert "Rolling back to the previous release" not in proc.stdout
+        assert _env(tmp_path) == "AUTORRENT_VERSION=2.7.0\n"
+
+
+class TestOwnerWithoutAName:
+    """A checkout owned by a UID with no name on the host (stat says UNKNOWN)."""
+
+    def test_git_runs_as_that_numeric_uid_not_as_root(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", uid="0", owner="UNKNOWN", fake_owner_id="568")
+        assert proc.returncode == 0, proc.stderr
+        # (the git shim records "sudo -H -u <user> env ... git ...")
+        proc, calls = run_update(tmp_path, owner="UNKNOWN", fake_owner_id="568")
+        sudo_git = [c for c in calls if c.startswith("sudo") and " git " in c]
+        assert sudo_git and all(c.startswith("sudo -H -u #568 ") for c in sudo_git)
+
+    def test_ownership_repair_uses_the_numeric_id(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, owner="UNKNOWN", fake_owner_id="568", fake_stray="1")
+        assert proc.returncode == 0, proc.stderr
+        assert any(c.startswith("chown -R 568: ") for c in calls)
+
+    def test_a_root_owned_checkout_still_runs_git_directly(self, tmp_path):
+        proc, calls = run_update(tmp_path, owner="UNKNOWN", fake_owner_id="0")
+        assert not any(c.startswith("sudo") for c in calls)

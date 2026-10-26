@@ -21,6 +21,11 @@ Rules
   A PR merged with "[skip release]" in its title is never released, and only the
   default branch (DEFAULT_BRANCH) ever releases: a manual run on a feature branch
   just builds.
+* Release button: a manual run ("Run workflow" in the Actions tab) that picks
+  patch, minor or major (FORCE_BUMP) releases that bump regardless of the commit
+  titles — for a docs/chore merge you do want shipped, or a bigger bump than the
+  titles imply.  It still needs something new since the last release, and it
+  ignores "[skip release]" (you asked for it by hand).
 
 Commit titles are the PR titles (GitHub puts a merge's PR title on the line after
 "Merge pull request ..."), so this follows the conventional-commit style PRs use.
@@ -130,6 +135,17 @@ def fmt(v: Version) -> str:
     return ".".join(map(str, v))
 
 
+FORCEABLE = {"patch", "minor", "major"}
+
+
+def forced_bump(env: dict[str, str]) -> str | None:
+    """The bump chosen on a manual run, or None (also for any value not in the list)."""
+    if env.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+        return None
+    choice = env.get("FORCE_BUMP", "").strip().lower()
+    return choice if choice in FORCEABLE else None
+
+
 def decide(env: dict[str, str]) -> dict[str, str]:
     if env.get("GITHUB_REF_TYPE") == "tag":
         tag = env.get("GITHUB_REF_NAME", "")
@@ -149,7 +165,10 @@ def decide(env: dict[str, str]) -> dict[str, str]:
     default_branch = env.get("DEFAULT_BRANCH")
     on_default = not default_branch or env.get("GITHUB_REF_NAME") == default_branch
     kind = None
-    if on_default and not SKIP_MARKER.search(head_message):
+    forced = forced_bump(env)
+    if on_default and forced:
+        kind = forced if messages_since(tag) else None   # nothing new: nothing to release
+    elif on_default and not SKIP_MARKER.search(head_message):
         kind = classify(messages_since(tag))
     if kind is None:
         return {"version": fmt(current), "tag": tag, "minor": f"{current[0]}.{current[1]}",

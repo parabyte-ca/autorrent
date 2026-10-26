@@ -81,6 +81,11 @@ def _make_download(db, **kwargs) -> Download:
     return d
 
 
+def _statuses(status: dict, torrent_hash: str = "abc123def456") -> dict:
+    """What get_all_torrent_statuses returns: one qBittorrent snapshot keyed by hash."""
+    return {torrent_hash: status}
+
+
 def _make_history(db, torrent_hash="abc123def456", status="downloading"):
     h = DownloadHistory(
         name="Test Show S01E01",
@@ -103,9 +108,9 @@ class TestCompletionStateMapping:
     def test_complete_state_sets_status_completed(self, qbit_state, client, db_session):
         d = _make_download(db_session, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent"):
-            mock_gts.return_value = {"status": qbit_state, "progress": 1.0, "size": 1000}
+            mock_gts.return_value = _statuses({"status": qbit_state, "progress": 1.0, "size": 1000})
             resp = client.get("/downloads")
 
         assert resp.status_code == 200
@@ -118,8 +123,8 @@ class TestCompletionStateMapping:
     def test_downloading_state_keeps_downloading_status(self, client, db_session):
         d = _make_download(db_session, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts:
-            mock_gts.return_value = {"status": "downloading", "progress": 0.5}
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts:
+            mock_gts.return_value = _statuses({"status": "downloading", "progress": 0.5})
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -128,8 +133,8 @@ class TestCompletionStateMapping:
     def test_error_state_sets_error_status(self, client, db_session):
         d = _make_download(db_session, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts:
-            mock_gts.return_value = {"status": "error", "progress": 0.0}
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts:
+            mock_gts.return_value = _statuses({"status": "error", "progress": 0.0})
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -138,8 +143,8 @@ class TestCompletionStateMapping:
     def test_stalledDL_not_treated_as_complete(self, client, db_session):
         d = _make_download(db_session, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts:
-            mock_gts.return_value = {"status": "stalledDL", "progress": 0.3}
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts:
+            mock_gts.return_value = _statuses({"status": "stalledDL", "progress": 0.3})
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -153,9 +158,9 @@ class TestCompletionTracking:
     def test_completion_first_seen_at_set_on_first_detection(self, client, db_session):
         d = _make_download(db_session, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -169,9 +174,9 @@ class TestCompletionTracking:
             completion_first_seen_at=first_seen,
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -180,9 +185,9 @@ class TestCompletionTracking:
     def test_moving_state_does_not_set_completion_first_seen_at(self, client, db_session):
         d = _make_download(db_session, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent"):
-            mock_gts.return_value = {"status": "moving", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "moving", "progress": 1.0})
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -192,9 +197,9 @@ class TestCompletionTracking:
         d = _make_download(db_session, status="downloading")
         h = _make_history(db_session, torrent_hash=d.torrent_hash, status="downloading")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0, "size": 5000}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0, "size": 5000})
             client.get("/downloads")
 
         db_session.refresh(h)
@@ -209,9 +214,9 @@ class TestCompletionTracking:
         )
         h = _make_history(db_session, torrent_hash=d.torrent_hash, status="completed")
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             client.get("/downloads")
 
         db_session.refresh(h)
@@ -232,9 +237,9 @@ class TestGracePeriod:
             completion_first_seen_at=datetime.utcnow() - timedelta(seconds=30),
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent") as mock_remove:
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             client.get("/downloads")
 
         mock_remove.assert_not_called()
@@ -248,10 +253,10 @@ class TestGracePeriod:
             completion_first_seen_at=datetime.utcnow() - timedelta(seconds=61),
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent") as mock_remove, \
              patch("app.routers.downloads._fire_media_refresh"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             mock_remove.return_value = None
             client.get("/downloads")
 
@@ -271,10 +276,10 @@ class TestGracePeriod:
         def _capture_remove(hash_, *, delete_files):
             calls.append(delete_files)
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent", side_effect=_capture_remove), \
              patch("app.routers.downloads._fire_media_refresh"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             client.get("/downloads")
 
         assert calls == [False], "delete_files must always be False"
@@ -291,10 +296,10 @@ class TestDeletionFailure:
             completion_first_seen_at=datetime.utcnow() - timedelta(seconds=61),
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent") as mock_remove, \
              patch("app.routers.downloads._fire_media_refresh"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             mock_remove.side_effect = Exception("qbittorrent unreachable")
             client.get("/downloads")
 
@@ -308,10 +313,10 @@ class TestDeletionFailure:
             completion_first_seen_at=datetime.utcnow() - timedelta(seconds=61),
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts, \
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts, \
              patch("app.routers.downloads.remove_torrent") as mock_remove, \
              patch("app.routers.downloads._fire_media_refresh"):
-            mock_gts.return_value = {"status": "uploading", "progress": 1.0}
+            mock_gts.return_value = _statuses({"status": "uploading", "progress": 1.0})
             mock_remove.side_effect = [Exception("first failure"), None]
 
             client.get("/downloads")   # first poll — fails
@@ -333,9 +338,9 @@ class TestAlreadyAbsent:
             completion_first_seen_at=datetime.utcnow() - timedelta(seconds=61),
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts:
-            # Returning None simulates torrent not found in qBittorrent
-            mock_gts.return_value = None
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts:
+            # An empty map simulates the torrent not being in qBittorrent
+            mock_gts.return_value = {}
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -348,8 +353,8 @@ class TestAlreadyAbsent:
             completion_first_seen_at=datetime.utcnow() - timedelta(seconds=30),
         )
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts:
-            mock_gts.return_value = None
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts:
+            mock_gts.return_value = {}
             client.get("/downloads")
 
         db_session.refresh(d)
@@ -358,7 +363,7 @@ class TestAlreadyAbsent:
     def test_qbit_removed_torrents_not_queried(self, client, db_session):
         _make_download(db_session, status="completed", qbit_removed=True)
 
-        with patch("app.routers.downloads.get_torrent_status") as mock_gts:
+        with patch("app.routers.downloads.get_all_torrent_statuses") as mock_gts:
             client.get("/downloads")
 
         mock_gts.assert_not_called()
@@ -366,7 +371,7 @@ class TestAlreadyAbsent:
     def test_response_shows_completed_for_removed_torrent(self, client, db_session):
         _make_download(db_session, status="completed", qbit_removed=True)
 
-        with patch("app.routers.downloads.get_torrent_status"):
+        with patch("app.routers.downloads.get_all_torrent_statuses"):
             resp = client.get("/downloads")
 
         assert resp.json()[0]["status"] == "completed"

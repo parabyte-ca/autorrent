@@ -261,6 +261,60 @@ def test_the_real_repository_history_runs():
     assert re.search(r"^version=\d+\.\d+\.\d+$", proc.stdout, re.M)
 
 
+# ── the release button (manual run with a chosen bump) ────────────────────────
+
+BUTTON = {"GITHUB_EVENT_NAME": "workflow_dispatch"}
+
+
+class TestReleaseButton:
+    @pytest.mark.parametrize("choice,version", [("patch", "2.6.1"), ("minor", "2.7.0"), ("major", "3.0.0")])
+    def test_the_chosen_bump_releases_even_for_a_docs_merge(self, repo, choice, version):
+        r = after_release(repo, "docs: reword the readme", **BUTTON, FORCE_BUMP=choice)
+        assert (r["release"], r["bump"], r["version"], r["tag"]) == ("true", choice, version, f"v{version}")
+
+    def test_the_chosen_bump_wins_over_what_the_titles_imply(self, repo):
+        r = after_release(repo, "feat: big thing", **BUTTON, FORCE_BUMP="patch")
+        assert (r["bump"], r["version"]) == ("patch", "2.6.1")
+
+    def test_none_leaves_the_normal_rules_alone(self, repo):
+        assert after_release(repo, "docs: x", **BUTTON, FORCE_BUMP="none")["release"] == "false"
+        assert decide(repo, **BUTTON, FORCE_BUMP="none")["release"] == "false"
+        commit(repo, "fix: y")
+        assert decide(repo, **BUTTON, FORCE_BUMP="none")["version"] == "2.6.1"
+
+    def test_nothing_new_since_the_last_release_means_nothing_to_release(self, repo):
+        r = decide(repo, **BUTTON, FORCE_BUMP="minor")
+        assert (r["release"], r["version"]) == ("false", "2.6.0")
+
+    def test_it_ignores_the_skip_marker_because_you_asked_by_hand(self, repo):
+        r = after_release(repo, "chore: tidy [skip release]", **BUTTON, FORCE_BUMP="patch")
+        assert r["release"] == "true" and r["version"] == "2.6.1"
+
+    def test_only_the_default_branch_can_be_released_this_way(self, repo):
+        r = after_release(repo, "fix: x", **BUTTON, FORCE_BUMP="patch",
+                          GITHUB_REF_NAME="feature", DEFAULT_BRANCH="main")
+        assert r["release"] == "false"
+
+    def test_a_forced_bump_still_never_reuses_a_tag(self, repo):
+        git(repo, "tag", "v2.6.1")          # exists but is not on this history
+        commit(repo, "docs: y")
+        r = decide(repo, **BUTTON, FORCE_BUMP="patch")
+        assert r["version"] == "2.6.2"
+
+    @pytest.mark.parametrize("junk", ["", "PATCH ", "v2.9.9", "patch; rm -rf /", "$(id)", "minor\n::set-output x"])
+    def test_only_known_choices_count(self, repo, junk):
+        commit(repo, "docs: z")
+        r = decide(repo, **BUTTON, FORCE_BUMP=junk)
+        if junk.strip().lower() in ("patch",):
+            assert r["bump"] == "patch"
+        else:
+            assert r["release"] == "false"
+
+    def test_a_push_to_main_ignores_force_bump(self, repo):
+        r = after_release(repo, "docs: z", GITHUB_EVENT_NAME="push", FORCE_BUMP="major")
+        assert r["release"] == "false"
+
+
 # ── the workflow wires it up correctly ────────────────────────────────────────
 
 
@@ -314,6 +368,13 @@ class TestWorkflow:
 
     def test_workflow_can_create_tags_and_releases_and_push_packages(self, wf):
         assert wf["jobs"]["build"]["permissions"] == {"contents": "write", "packages": "write"}
+
+    def test_the_release_button_is_a_choice_that_reaches_the_script(self, wf):
+        on = wf.get("on", wf.get(True))
+        bump = on["workflow_dispatch"]["inputs"]["bump"]
+        assert bump["type"] == "choice" and bump["default"] == "none"
+        assert bump["options"] == ["none", "patch", "minor", "major"]
+        assert self.step(wf, "Decide version")["env"]["FORCE_BUMP"] == "${{ inputs.bump }}"
 
     def test_manual_tag_pushes_and_manual_runs_still_trigger_it(self, wf):
         on = wf.get("on", wf.get(True))

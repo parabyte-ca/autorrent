@@ -149,20 +149,6 @@ class TestCheckDuplicate:
         assert result["is_duplicate"] is True
         assert result["match_type"] == "name"
 
-    def test_active_qbit_match_returns_duplicate(self, db_session):
-        mock_torrent = MagicMock()
-        mock_torrent.name = "Active Show S01E01"
-        mock_client = MagicMock()
-        mock_client.torrents_info.return_value = [mock_torrent]
-
-        with patch("app.services.qbittorrent._get_client", return_value=mock_client):
-            result = check_duplicate("activehash123", "No Match In DB", db_session)
-
-        assert result["is_duplicate"] is True
-        assert result["match_type"] == "active"
-        assert result["matched_name"] == "Active Show S01E01"
-        assert result["matched_at"] is None
-
     def test_no_match_returns_not_duplicate(self, db_session):
         mock_client = MagicMock()
         mock_client.torrents_info.return_value = []

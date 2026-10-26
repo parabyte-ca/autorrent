@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Clock, Download, RefreshCw, Terminal, Wifi, WifiOff } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Download, RefreshCw, Undo2, Terminal, Wifi, WifiOff } from "lucide-react";
 import { api, type UpdateStatus } from "../api/client";
 import { marked } from "marked";
 
@@ -34,7 +34,7 @@ export default function Updates() {
   const [checking, setChecking] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirm, setConfirm] = useState<"upgrade" | "rollback" | null>(null);
   const [showLog, setShowLog] = useState(false);
   const logRef = useRef<HTMLPreElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -89,12 +89,14 @@ export default function Updates() {
   };
 
   const handleUpgrade = async () => {
-    if (!status?.latest_release) return;
-    setShowConfirm(false);
+    const rollback = confirm === "rollback";
+    const version = rollback ? status?.previous_version : status?.latest_release?.version;
+    if (!version) return;
+    setConfirm(null);
     setUpgrading(true);
     setShowLog(true);
     try {
-      const s = await api.updates.upgrade(status.latest_release.version);
+      const s = await api.updates.upgrade(version, rollback);
       setStatus(s);
     } catch (e) {
       setError((e as Error).message);
@@ -175,12 +177,22 @@ export default function Updates() {
             {status?.upgrade_state && <StateChip state={status.upgrade_state} />}
             {status?.can_upgrade && (
               <button
-                onClick={() => setShowConfirm(true)}
+                onClick={() => setConfirm("upgrade")}
                 disabled={upgrading || inProgress}
                 className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-3 py-2 text-sm font-medium transition-colors"
               >
                 <Download className="h-4 w-4" />
                 Upgrade to v{status.latest_release?.version}
+              </button>
+            )}
+            {status?.can_rollback && (
+              <button
+                onClick={() => setConfirm("rollback")}
+                disabled={upgrading || inProgress}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              >
+                <Undo2 className="h-4 w-4" />
+                Roll back to v{status.previous_version}
               </button>
             )}
           </div>
@@ -289,20 +301,21 @@ export default function Updates() {
       )}
 
       {/* Confirm dialog */}
-      {showConfirm && (
+      {confirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 shadow-2xl p-6 mx-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-              Confirm upgrade
+              {confirm === "rollback" ? "Confirm rollback" : "Confirm upgrade"}
             </h3>
             <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
-              Upgrade from <strong>v{status?.current_version}</strong> to{" "}
-              <strong>v{status?.latest_release?.version}</strong>?
+              {confirm === "rollback" ? "Roll back" : "Upgrade"} from <strong>v{status?.current_version}</strong> to{" "}
+              <strong>v{confirm === "rollback" ? status?.previous_version : status?.latest_release?.version}</strong>?
               The container will restart — this will briefly interrupt service.
+              {confirm === "rollback" && " Your data stays as it is; if you have used features added since, back up first (Settings → Data management)."}
             </p>
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => setShowConfirm(false)}
+                onClick={() => setConfirm(null)}
                 className="rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
               >
                 Cancel
@@ -311,7 +324,7 @@ export default function Updates() {
                 onClick={handleUpgrade}
                 className="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm font-medium transition-colors"
               >
-                Upgrade
+                {confirm === "rollback" ? "Roll back" : "Upgrade"}
               </button>
             </div>
           </div>
