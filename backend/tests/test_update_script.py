@@ -65,13 +65,26 @@ echo "${FAKE_UID:-0}"
     "stat": r'''#!/usr/bin/env bash
 echo "${FAKE_OWNER:-root}"
 ''',
+    # Reports a stray (wrongly owned) file inside .git when FAKE_STRAY is set.
+    "find": r'''#!/usr/bin/env bash
+echo "find $*" >> "$FAKE_LOG"
+[[ -n "${FAKE_STRAY:-}" ]] && echo "$1/FETCH_HEAD"
+exit 0
+''',
+    "chown": r'''#!/usr/bin/env bash
+echo "chown $*" >> "$FAKE_LOG"
+[[ -n "${FAKE_CHOWN_FAIL:-}" ]] && exit 1
+exit 0
+''',
 }
 
 
 def run_update(tmp_path, *args, compose=REGISTRY_COMPOSE, uid="0", owner="amoote",
-               origin=SSH_REMOTE, sudo_user=None, **fake):
+               origin=SSH_REMOTE, sudo_user=None, git_dir=False, **fake):
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
+    if git_dir:
+        (repo / ".git").mkdir(exist_ok=True)
     (repo / "update.sh").write_text(SCRIPT.read_text())
     compose_file = repo / "docker-compose.yml"
     compose_file.write_text(compose)
@@ -322,3 +335,41 @@ class TestStaysOnTheBranch:
     def test_local_build_deployments_are_not_pulled_back_to_the_branch(self, tmp_path):
         _, calls = run_update(tmp_path, "--version", "2.6.1", uid="1000", compose=BUILD_COMPOSE, fake_detached="1")
         assert not any(c.endswith("checkout main") for c in calls)
+
+
+# ── .git ownership repair ─────────────────────────────────────────────────────
+
+
+class TestGitOwnershipRepair:
+    def test_stray_files_are_handed_back_to_the_owner_before_git_runs(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, fake_stray="1", sudo_user="truenas_admin")
+        assert proc.returncode == 0, proc.stderr
+        chowns = [c for c in calls if c.startswith("chown")]
+        assert len(chowns) == 1 and chowns[0].startswith("chown -R amoote: ") and chowns[0].endswith("/.git")
+        first_git = next(i for i, c in enumerate(calls) if c.startswith("sudo"))
+        assert calls.index(chowns[0]) < first_git
+        assert "Restoring ownership" in proc.stdout
+
+    def test_nothing_is_changed_when_ownership_is_already_right(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, sudo_user="truenas_admin")
+        assert proc.returncode == 0, proc.stderr
+        assert not any(c.startswith("chown") for c in calls)
+
+    def test_not_root_never_touches_ownership(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, uid="1000", fake_stray="1")
+        assert not any(c.startswith(("chown", "find")) for c in calls)
+
+    def test_root_owned_checkout_is_left_alone(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, owner="root", fake_stray="1")
+        assert not any(c.startswith("chown") for c in calls)
+
+    def test_failed_repair_does_not_stop_the_update(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, fake_stray="1", fake_chown_fail="1")
+        assert proc.returncode == 0, proc.stderr
+        assert "Could not change ownership" in proc.stdout
+
+    def test_git_failure_explains_the_fix(self, tmp_path):
+        proc, _ = run_update(tmp_path, fake_https_fail="1", fake_origin_fail="1")
+        assert proc.returncode != 0
+        out = proc.stdout + proc.stderr
+        assert "git could not update" in out and "chown -R" in out

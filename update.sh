@@ -85,6 +85,17 @@ _git() {
     fi
 }
 
+# An earlier run of git as another user (the old update script as root, a stray
+# "sudo git pull") leaves files inside .git that the owner can no longer write:
+#   error: cannot open '.git/FETCH_HEAD': Permission denied
+# We are root here, so hand them back.
+if [[ -n "$_GIT_USER" && -d "$REPO_DIR/.git" ]]; then
+    if [[ -n "$(find "$REPO_DIR/.git" ! -user "$_GIT_USER" -print -quit 2>/dev/null)" ]]; then
+        info "Restoring ownership of .git to $_GIT_USER (an earlier run of git as another user left files it cannot write) ..."
+        chown -R "$_GIT_USER:" "$REPO_DIR/.git" || info "Could not change ownership — continuing; git may report a permission error."
+    fi
+fi
+
 # A GitHub remote can be fetched anonymously over HTTPS if the repository is
 # public — no SSH key needed.  Try that first, then the configured remote.
 _origin_url="$(_git config --get remote.origin.url 2>/dev/null || true)"
@@ -92,6 +103,11 @@ HTTPS_URL=""
 if [[ "$_origin_url" =~ ^(git@github\.com:|ssh://git@github\.com/)(.+)$ ]]; then
     HTTPS_URL="https://github.com/${BASH_REMATCH[2]}"
 fi
+
+# Git failed: say what to try instead of leaving a bare "exit 1".
+git_failed() {
+    die "git could not update $REPO_DIR (see the message above). If it mentions permissions, the git files may belong to another user — fix with: sudo chown -R \"\$(stat -c %U '$REPO_DIR')\": '$REPO_DIR/.git'"
+}
 
 git_pull_branch() {
     if [[ -n "$HTTPS_URL" ]]; then
@@ -161,13 +177,13 @@ if [[ "$OPT_NO_GIT" == false ]]; then
         _git checkout "$BRANCH"
     fi
     info "Pulling latest code (branch: $BRANCH) ..."
-    git_pull_branch
+    git_pull_branch || git_failed
 fi
 
 if [[ -n "$OPT_VERSION" ]]; then
     if [[ "$LOCAL_BUILD" == true ]]; then
         info "Checking out tag/version: $OPT_VERSION ..."
-        git_fetch_tags
+        git_fetch_tags || git_failed
         # Try v-prefixed tag first, then bare version.
         _git checkout "v${OPT_VERSION}" 2>/dev/null || _git checkout "$OPT_VERSION"
     else
