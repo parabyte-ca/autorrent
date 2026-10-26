@@ -83,6 +83,7 @@ _PRIVATE_KEYS = {
     "last_digest_sent_at",
     "update_release_cache",
     "update_notified_version",
+    "update_previous_version",
     "disk_warned",
     "trakt_last_result",
 }

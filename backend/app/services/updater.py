@@ -121,6 +121,32 @@ def _read_log_tail(folder: str) -> str:
 
 _CACHE_KEY = "update_release_cache"
 _NOTIFIED_KEY = "update_notified_version"
+_PREVIOUS_KEY = "update_previous_version"
+
+
+def _load_previous(db) -> Optional[str]:
+    """The version that was running when the last upgrade was requested, if it parses."""
+    from ..models import Setting
+    row = db.query(Setting).filter(Setting.key == _PREVIOUS_KEY).first()
+    value = normalise_version(row.value) if row and row.value else ""
+    return value if parse_semver(value) else None
+
+
+def _save_previous(db, version: str) -> None:
+    from ..models import Setting
+    row = db.query(Setting).filter(Setting.key == _PREVIOUS_KEY).first()
+    if row:
+        row.value = version
+    else:
+        db.add(Setting(key=_PREVIOUS_KEY, value=version))
+    db.commit()
+
+
+def rollback_target(db) -> Optional[str]:
+    """The earlier version a rollback would install, or None if there is no older one."""
+    prev = _load_previous(db)
+    cur_t, prev_t = parse_semver(get_current_version()), parse_semver(prev or "")
+    return prev if cur_t and prev_t and prev_t < cur_t else None
 
 
 def _load_cache(db) -> dict:
@@ -290,6 +316,7 @@ def get_status(db, *, include_log: bool = False) -> dict:
 
     upgrade_state, upgrade_message = derive_upgrade_state(folder)
     in_progress = upgrade_state in ("requested", "running")
+    previous = rollback_target(db)
 
     result = {
         "current_version": current,
@@ -306,6 +333,8 @@ def get_status(db, *, include_log: bool = False) -> dict:
         "upgrade_state": upgrade_state,
         "upgrade_message": upgrade_message,
         "can_upgrade": update_available and helper_connected and not in_progress,
+        "previous_version": previous,
+        "can_rollback": bool(previous) and helper_connected and not in_progress,
         "helper_install_cmd": "sudo bash scripts/upgrade-agent.sh --install",
     }
 
@@ -394,32 +423,43 @@ def daily_update_check() -> None:
 
 # ── Upgrade request ───────────────────────────────────────────────────────────
 
-def request_upgrade(db, version: str, requested_by: str) -> None:
+def request_upgrade(db, version: str, requested_by: str, rollback: bool = False) -> None:
     """
     Write request.json atomically to the upgrade folder after all guard checks.
+
+    ``rollback=True`` asks for the version that was running before the last
+    upgrade (an older release) instead of the newest one.
 
     Raises ValueError with a user-facing message on any validation failure.
     Raises OSError if the folder is not writable (with install instructions).
     """
     folder = _get_folder()
-    cache = _load_cache(db)
-
-    if not cache.get("version"):
-        raise ValueError("No release information cached — run a check first.")
-
-    latest_version = cache["version"]
-    if version != latest_version:
-        raise ValueError(
-            f"Version {version!r} does not match the latest cached release {latest_version!r}."
-        )
-
     current = get_current_version()
-    cur_t = parse_semver(current)
-    new_t = parse_semver(version)
-    if not (cur_t and new_t and new_t > cur_t):
-        raise ValueError(
-            f"Version {version} is not newer than the running version {current}."
-        )
+
+    if rollback:
+        target = rollback_target(db)
+        if not target:
+            raise ValueError("There is no earlier version to roll back to.")
+        if normalise_version(version) != target:
+            raise ValueError(f"Version {version!r} is not the previous version ({target}).")
+        version = target
+    else:
+        cache = _load_cache(db)
+        if not cache.get("version"):
+            raise ValueError("No release information cached — run a check first.")
+
+        latest_version = cache["version"]
+        if version != latest_version:
+            raise ValueError(
+                f"Version {version!r} does not match the latest cached release {latest_version!r}."
+            )
+
+        cur_t = parse_semver(current)
+        new_t = parse_semver(version)
+        if not (cur_t and new_t and new_t > cur_t):
+            raise ValueError(
+                f"Version {version} is not newer than the running version {current}."
+            )
 
     state, _ = derive_upgrade_state(folder)
     if state in ("requested", "running"):
@@ -452,6 +492,11 @@ def request_upgrade(db, version: str, requested_by: str) -> None:
             f"Run: sudo bash scripts/upgrade-agent.sh --install\n({exc})"
         ) from exc
 
+    # Remember where we came from, so the upgrade can be undone from the UI.
+    # (A rollback keeps the older recorded version, so it is not offered again.)
+    if not rollback:
+        _save_previous(db, normalise_version(current))
+
     # Audit notification
     from ..models import Setting
     settings = {s.key: s.value for s in db.query(Setting).all()}
@@ -459,7 +504,7 @@ def request_upgrade(db, version: str, requested_by: str) -> None:
     if apprise_url:
         notify(
             apprise_url,
-            title="AutoRrent — Upgrade Requested",
-            body=f"Upgrade {current} → {version} requested by {requested_by}.",
+            title="AutoRrent — Rollback Requested" if rollback else "AutoRrent — Upgrade Requested",
+            body=f"{'Rollback' if rollback else 'Upgrade'} {current} → {version} requested by {requested_by}.",
         )
-    logger.info("Upgrade requested: %s → %s by %s", current, version, requested_by)
+    logger.info("%s requested: %s → %s by %s", "Rollback" if rollback else "Upgrade", current, version, requested_by)

@@ -43,7 +43,7 @@ async def request_upgrade(request: Request, body: dict, db: Session = Depends(ge
     requested_by = (request.headers.get("X-Forwarded-For") or "authenticated user").split(",")[0].strip()[:200]
 
     try:
-        updater.request_upgrade(db, version, requested_by)
+        updater.request_upgrade(db, version, requested_by, rollback=body.get("rollback") is True)
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

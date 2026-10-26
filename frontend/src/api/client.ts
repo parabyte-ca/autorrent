@@ -334,6 +334,8 @@ export interface UpdateStatus {
   upgrade_state: "requested" | "running" | "succeeded" | "failed" | null;
   upgrade_message: string | null;
   can_upgrade: boolean;
+  previous_version: string | null;
+  can_rollback: boolean;
   helper_install_cmd: string;
   upgrade_log?: string;
 }
@@ -468,10 +470,10 @@ export const api = {
   updates: {
     status: () => req<UpdateStatus>("/admin/updates"),
     check: () => req<UpdateStatus>("/admin/updates/check", { method: "POST" }),
-    upgrade: (version: string) =>
+    upgrade: (version: string, rollback = false) =>
       req<UpdateStatus>("/admin/updates/upgrade", {
         method: "POST",
-        body: JSON.stringify({ version }),
+        body: JSON.stringify({ version, rollback }),
       }),
   },
 
