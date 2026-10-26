@@ -63,13 +63,22 @@ cd "$REPO_DIR"
 #   * root has none of that user's SSH keys.
 # This matters most when the upgrade helper runs us from cron, where there is
 # no SUDO_USER and no login name to fall back on.
-_GIT_USER=""
+_GIT_USER=""        # name (or numeric id) for find/chown
+_GIT_SUDO=""        # the same, as sudo -u wants it ("#568" for a bare id)
 if [[ "$(id -u)" -eq 0 ]]; then
     _owner="$(stat -c %U "$REPO_DIR" 2>/dev/null || true)"
+    _owner_id="$(stat -c %u "$REPO_DIR" 2>/dev/null || true)"
     if [[ -n "$_owner" && "$_owner" != "root" && "$_owner" != "UNKNOWN" ]]; then
         _GIT_USER="$_owner"
+        _GIT_SUDO="$_owner"
+    elif [[ "$_owner" == "UNKNOWN" && "$_owner_id" =~ ^[0-9]+$ && "$_owner_id" != "0" ]]; then
+        # The owner has no name on this host (e.g. an app/container UID): use the number.
+        # Falling through to root would make git refuse with "dubious ownership".
+        _GIT_USER="$_owner_id"
+        _GIT_SUDO="#$_owner_id"
     elif [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
         _GIT_USER="$SUDO_USER"
+        _GIT_SUDO="$SUDO_USER"
     fi
     if [[ -n "$_GIT_USER" ]] && ! command -v sudo &>/dev/null; then
         die "sudo is required to run git as $_GIT_USER (the owner of $REPO_DIR)."
@@ -80,7 +89,7 @@ fi
 # nobody can type (cron, the upgrade helper).
 _git() {
     if [[ -n "$_GIT_USER" ]]; then
-        sudo -H -u "$_GIT_USER" env GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" "$@"
+        sudo -H -u "$_GIT_SUDO" env GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" "$@"
     else
         GIT_TERMINAL_PROMPT=0 git -C "$REPO_DIR" "$@"
     fi

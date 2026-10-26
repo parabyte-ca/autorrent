@@ -86,7 +86,7 @@ exec "$@"
 echo "${FAKE_UID:-0}"
 ''',
     "stat": r'''#!/usr/bin/env bash
-echo "${FAKE_OWNER:-root}"
+if [[ "$*" == *"%u"* ]]; then echo "${FAKE_OWNER_ID:-1000}"; else echo "${FAKE_OWNER:-root}"; fi
 ''',
     # Reports a stray (wrongly owned) file inside .git when FAKE_STRAY is set.
     "find": r'''#!/usr/bin/env bash
@@ -519,3 +519,24 @@ class TestRollback:
         assert proc.returncode != 0
         assert "Rolling back to the previous release" not in proc.stdout
         assert _env(tmp_path) == "AUTORRENT_VERSION=2.7.0\n"
+
+
+class TestOwnerWithoutAName:
+    """A checkout owned by a UID with no name on the host (stat says UNKNOWN)."""
+
+    def test_git_runs_as_that_numeric_uid_not_as_root(self, tmp_path):
+        proc, calls = run_update(tmp_path, "--no-git", uid="0", owner="UNKNOWN", fake_owner_id="568")
+        assert proc.returncode == 0, proc.stderr
+        # (the git shim records "sudo -H -u <user> env ... git ...")
+        proc, calls = run_update(tmp_path, owner="UNKNOWN", fake_owner_id="568")
+        sudo_git = [c for c in calls if c.startswith("sudo") and " git " in c]
+        assert sudo_git and all(c.startswith("sudo -H -u #568 ") for c in sudo_git)
+
+    def test_ownership_repair_uses_the_numeric_id(self, tmp_path):
+        proc, calls = run_update(tmp_path, git_dir=True, owner="UNKNOWN", fake_owner_id="568", fake_stray="1")
+        assert proc.returncode == 0, proc.stderr
+        assert any(c.startswith("chown -R 568: ") for c in calls)
+
+    def test_a_root_owned_checkout_still_runs_git_directly(self, tmp_path):
+        proc, calls = run_update(tmp_path, owner="UNKNOWN", fake_owner_id="0")
+        assert not any(c.startswith("sudo") for c in calls)
