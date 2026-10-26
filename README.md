@@ -110,6 +110,16 @@ docker pull ghcr.io/parabyte-ca/autorrent:latest
 docker compose up -d
 ```
 
+### Versions and rolling back
+
+`update.sh` (and the in-app upgrade) installs an exact release and records it as `AUTORRENT_VERSION` in `.env`; `docker-compose.yml` uses it as the image tag (`ghcr.io/parabyte-ca/autorrent:${AUTORRENT_VERSION:-latest}`). That is what makes going back possible:
+
+- **Automatic** — if the new version does not become healthy, `update.sh` puts the previous release back.
+- **From the app** — after an upgrade, the **Updates** page shows **Roll back to vX.Y.Z**.
+- **By hand** — `./update.sh --version 2.6.1` installs any published release, older ones included.
+
+Rolling back keeps your data; if you have used features added since, take a backup first (Settings → Data management). Delete the `AUTORRENT_VERSION` line from `.env` to follow `latest` again.
+
 You can also update from inside the app: the **Updates** page shows when a new release is available and can install it for you (see `scripts/upgrade-agent.sh`).
 
 Your data is stored in `./data/` and is not affected by updates.
@@ -232,6 +242,7 @@ All settings are managed through the Settings page. The table below documents ea
 | Jellyfin API key | — | Generated in Jellyfin → Dashboard → API Keys |
 | Jellyfin library ID | — | ItemId of the library to refresh; blank refreshes all |
 | Apprise URL | — | Notification endpoint — leave blank to disable |
+| TMDB API key | — | Optional. Enables posters for movies (TV posters need no key). Free at themoviedb.org → Settings → API; paste the API Key or the Read Access Token |
 
 ---
 
@@ -353,7 +364,7 @@ Merging to `main` publishes a release when the merged change warrants one — yo
 | `feat!: …`, `fix!: …`, or a `BREAKING CHANGE:` line in the body | major — `2.7.0` → `3.0.0` |
 | `docs:`, `ci:`, `test:`, `chore:`, `refactor:`, `style:`, `build:` | none (an image is still built) |
 
-Add `[skip release]` to a PR title to merge without releasing. When several PRs merge before a build runs, the biggest change wins. A release builds the image (`vX.Y.Z`, `X.Y` and `latest`), then creates the git tag and GitHub release; the in-app **Updates** page offers it. To release whatever is pending right now, run the *Build and push Docker image* workflow manually on `main`. Pushing a `vX.Y.Z` tag yourself still works and builds exactly that version. The logic lives in `scripts/next_version.py`.
+Add `[skip release]` to a PR title to merge without releasing. When several PRs merge before a build runs, the biggest change wins. A release builds the image (`vX.Y.Z`, `X.Y` and `latest`), then creates the git tag and GitHub release; the in-app **Updates** page offers it. **Release button:** to release right now whatever the titles say — say, a `docs:` merge you do want shipped, or a bigger bump — open the repository's **Actions** tab → *Build and push Docker image* → **Run workflow**, keep branch `main`, and pick `patch`, `minor` or `major`. (`none` just builds the image.) It needs something new since the last release, and ignores `[skip release]`. Pushing a `vX.Y.Z` tag yourself still works and builds exactly that version. The logic lives in `scripts/next_version.py`.
 
 ---
 

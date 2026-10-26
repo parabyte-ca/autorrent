@@ -7,6 +7,10 @@ name: Build and push Docker image
 # it as vX.Y.Z / X.Y / latest, then creates the git tag and the GitHub release
 # (the in-app updater offers that release). Pushing a vX.Y.Z tag by hand still
 # works and builds exactly that version.
+#
+# Release button: Actions -> "Build and push Docker image" -> Run workflow, pick
+# patch / minor / major to release the current main right now with that bump
+# (e.g. after a docs/chore merge that you want shipped).
 on:
   push:
     branches:
@@ -14,6 +18,12 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      bump:
+        description: "Release this commit with this version bump (none = just build the image)"
+        type: choice
+        options: [none, patch, minor, major]
+        default: none
 
 # One build per tag, and one at a time for main: merges queue behind each other,
 # so two merges can never both compute the same next version. (A run still waiting
@@ -49,6 +59,7 @@ jobs:
         id: ver
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          FORCE_BUMP: ${{ inputs.bump }}
         run: python3 scripts/next_version.py >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata for Docker
